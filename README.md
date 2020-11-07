@@ -1,7 +1,7 @@
 # KoCo19
 
-Code for laboratory and epidemiological analysis of the prospective Covid-19
-cohort study Munich (KoCo19).
+Code for laboratory and epidemiological analysis for the initial examination
+of the prospective Covid-19 cohort study Munich (KoCo19).
 The study website is [http://koco19.de](http://koco19.de), see there for
 further information.
 
