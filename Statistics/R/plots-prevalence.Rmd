@@ -1,0 +1,140 @@
+---
+title: "Prevalence Plot"
+author: "Mercè Garí"
+date: '2020-10-09'
+output:
+  flexdashboard::flex_dashboard:
+    orientation: rows
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(ggthemes)
+library(GGally)
+library(colorspace)
+library(readxl)
+library(forcats)
+library(scales)
+library(gridExtra)
+library(cowplot)
+library(Cairo)
+
+col_grey = "#999999"
+col_trueneg = "#56B4E9" #"#0072B2"
+col_truepos = "#D55E00"
+pal <- c(col_grey, col_trueneg, col_truepos)
+
+
+d <- read.csv("prevalence_estimates.csv")
+
+head(d)
+str(d)
+
+# For the plot
+
+plot <- d %>%
+  select(Classifier, weighted, spec_sens, 
+         Seroprevalence_adjusted, 
+         lower_ci_adjusted, upper_ci_adjusted) %>%
+  mutate(weighted = case_when(
+    weighted %in% "yes" ~ "Weighted",
+    weighted %in% "no" ~ "Unweighted")) %>%
+  mutate(weighted = fct_inorder(weighted)) %>%
+  mutate(spec_sens = case_when(
+    spec_sens %in% "Manufacturer's sensitivity (high)" ~ "Manufacturer (high sensitivity)",
+    spec_sens %in% "Manufacturer's sensitivity (low)" ~ "Manufacturer (low sensitivity)",
+    spec_sens %in% "Own" ~ "Optimised")) %>%
+  mutate(Classifier = case_when(
+    Classifier %in% "EI-S1-IgA manufacturer's cut-off" ~ "EI-S1-IgA \n(Manufacturer's cut-off)",
+    Classifier %in% "EI-S1-IgA optimized cut-off" ~ "EI-S1-IgA \n(Optimised cut-off)",
+        Classifier %in% "EI-S1-IgG manufacturer's cut-off" ~ "EI-S1-IgG \n(Manufacturer's cut-off)",
+    Classifier %in% "EI-S1-IgG optimized cut-off" ~ "EI-S1-IgG \n(Optimised cut-off)",    
+    Classifier %in% "Ro-N-Ig manufacturer's cut-off" ~ "Ro-N-Ig \n(Manufacturer's cut-off)",
+    Classifier %in% "Ro-N-Ig optimized cut-off" ~ "Ro-N-Ig \n(Optimised cut-off)",
+    Classifier %in% "Random Forest" ~ "Random Forest",
+    Classifier %in% "Support Vector Machine" ~ "Support Vector Machine")) %>%
+  mutate(`Specificity/Sensitivity` = spec_sens) %>%
+  mutate(Classifier = fct_inorder(Classifier)) %>%
+  mutate(Classifier = fct_rev(Classifier)) %>%
+  ggplot(aes(y=Seroprevalence_adjusted*100, 
+             x=Classifier, color=`Specificity/Sensitivity`)) +
+  geom_point(position=position_dodge(width=0.5)) +
+  geom_linerange(aes(ymin=lower_ci_adjusted*100,
+                     ymax=upper_ci_adjusted*100), 
+                 position=position_dodge(width=0.5)) +
+  coord_flip() +
+  scale_color_manual(values=pal[c(3,2,1)]) +
+  xlab("") + ylab("Adjusted seroprevalence (%)") +
+  theme_bw() +
+  facet_wrap(~weighted)
+plot
+
+# For the table
+table <- d %>%
+  filter(weighted %in% "yes") %>%
+  select(Classifier, Cut.off, Our.specificity,
+         Our.sensitivity,
+         Manufacturer.s.specificity,
+         Manufacturer.s.sensitivity..low.,
+         Manufacturer.s.sensitivity..high.) %>%
+  rename(`Specificity\nOptimised` = Our.specificity,
+         `Sensitivity\nOptimised` = Our.sensitivity,
+         `Specificity\nManufacturer` = Manufacturer.s.specificity,
+         `Sensitivity\nManufacturer (low)` = Manufacturer.s.sensitivity..low.,
+         `Sensitivity\nManufacturer (high)` = Manufacturer.s.sensitivity..high.) %>%
+  mutate(Classifier = case_when(
+    Classifier %in% "EI-S1-IgA manufacturer's cut-off" ~ "EI-S1-IgA \n(Manufacturer's cut-off)",
+    Classifier %in% "EI-S1-IgA optimized cut-off" ~ "EI-S1-IgA \n(Optimised cut-off)",
+        Classifier %in% "EI-S1-IgG manufacturer's cut-off" ~ "EI-S1-IgG \n(Manufacturer's cut-off)",
+    Classifier %in% "EI-S1-IgG optimized cut-off" ~ "EI-S1-IgG \n(Optimised cut-off)",    
+    Classifier %in% "Ro-N-Ig manufacturer's cut-off" ~ "Ro-N-Ig \n(Manufacturer's cut-off)",
+    Classifier %in% "Ro-N-Ig optimized cut-off" ~ "Ro-N-Ig \n(Optimised cut-off)",
+    Classifier %in% "Random Forest" ~ "Random Forest",
+    Classifier %in% "Support Vector Machine" ~ "Support Vector Machine")) %>%
+  mutate(Classifier = fct_inorder(Classifier)) %>%
+  unique() %>%
+  gather(parameter, value, -Classifier, -Cut.off) %>%
+  filter(!is.na(value)) %>%
+  mutate(value = signif(value, digits=3)) %>%
+  mutate(value = as.character(value)) %>%
+  mutate(value = ifelse(value=="1", "1.000", value)) %>%
+  spread(parameter, value) %>%
+  gather(parameter, value, -Classifier, -Cut.off) %>%
+  mutate(value = ifelse(is.na(value), "", value)) %>%
+         spread(parameter, value) %>%
+  rename(`Cut-off` = Cut.off) %>%
+  mutate(`Cut-off` = signif(`Cut-off`, digits=3)) %>%
+  mutate(`Cut-off` = as.character(`Cut-off`)) %>%
+  mutate(`Cut-off` = ifelse(is.na(`Cut-off`), "",
+                            ifelse(`Cut-off` == "1.1", "1.100",
+                                   ifelse(`Cut-off` == "1.08", "1.080", ifelse(`Cut-off` == "1.01", "1.010", ifelse(`Cut-off` == "1", "1.000", `Cut-off`)))))) %>%
+  dplyr::select(Classifier, `Cut-off`, `Specificity\nManufacturer`,
+                `Specificity\nOptimised`, `Sensitivity\nManufacturer (low)`, `Sensitivity\nManufacturer (high)`,            `Sensitivity\nOptimised`) 
+table
+  
+my.table <- tableGrob(table, theme=ttheme_default(base_size=9),
+                      rows=NULL)
+plot.table <- grid.arrange(plot, my.table, ncol=1)
+plot.table
+
+
+plot_grid(plot, my.table, ncol=1, rel_heights = c(3/6, 3/6))
+
+# Save plot+table in pdf and png
+ggsave(file="Epi-SI-Prevalence-plot-table.pdf", 
+       device=cairo_pdf,
+       width=10, height=8)
+
+ggsave(file="Epi-SI-Prevalence-plot-table.png", 
+       width=10, height=8)
+
+
+```
+
+
+

@@ -1,0 +1,468 @@
+---
+title: "Simplified German Epi Figures Part Yannik"
+author: "Yannik Schälte"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+# Figure 1 (Participant and case numbers)
+
+## Preparations
+
+```{r}
+library(ggplot2)
+library(cowplot)
+library(magrittr)
+library(dplyr)
+
+here_r = function (...) here::here("Statistics", "R", ...)
+here_koco = function (...) here::here("KoCo19_Datasets", ...)
+here_out = function (...) here::here("Epi_out", "epi_figures_yannik_DZ", ...)
+
+dir.create(here_out(), showWarnings = FALSE)
+
+# Setup
+source(here_r("setup.R"))
+source(here_r("functions.R"))
+
+koco_data = read.csv(here_koco("Analysis Data Sets", "Koco_baseline.csv"))
+muc_data = read.csv(here_koco(
+  "Analysis Data Sets", "muc_data_cases_04_11.csv"), sep=',')
+
+# Definitions
+col_red = "#bf635d"
+col_blue = "#59a3b2"
+col_green = "#59ab7c"
+col_yellow = "#efae59"
+
+col_koco = col_blue
+col_muc = col_red
+col_koco2 = "#01579B"
+col_muc2 = "#B00020"
+col_books = col_yellow
+
+date_range = c(as.Date("2020-03-01"), as.Date("2020-06-08"))
+date_breaks = as.Date(
+  c("2020-03-01", "2020-04-01", "2020-05-01", "2020-06-01"))
+date_break_labels =
+  c("01.03.", "01.04.", "01.05.", "01.06.")
+
+###############################################################################
+# Set up Munich data
+
+muc_data = dplyr::rename(
+  muc_data,
+  "Date"="Datum",
+  "Deceased"="Verstorben",
+  "Recovered"="Genesen",
+  "Total"="Gesamt",
+  "Infected"="Aktuell.infiziert"
+)
+
+# Fix funny data entries
+muc_data[is.na(muc_data)] = 0
+
+# Clear up Date
+muc_data$Date = paste(muc_data$Date,"-2020", sep="")
+muc_data$Date = as.Date(as.character(muc_data$Date), format = c("%d-%b-%Y"))
+# Restrict to < 2020-06-06 as there was a change of data thereafter
+muc_data = muc_data[which(muc_data$Date < "2020-06-13"),]
+# Get week of year (as by ISO 8601, starting on Monday)
+muc_data$Week = lubridate::isoweek(muc_data$Date)
+
+# Check totals
+muc_data$Total_check =
+  muc_data$Deceased + muc_data$Recovered + muc_data$Infected
+if (sum(muc_data$Total-muc_data$Total_check) != 0) {
+  stop("Totals do not fit")
+}
+
+muc_date = muc_data
+
+# Get table with the first entry per week
+muc_week = muc_data[!duplicated(muc_data$Week),]
+
+# Get table with the last entry per week
+#muc_week = muc_data[!rev(duplicated(rev(muc_data$Week))),]
+
+# Count new cases
+muc_date$New_cases = muc_date$Total -
+  c(0, muc_date[1:nrow(muc_date)-1,"Total"])
+muc_week$New_cases = muc_week$Total -
+  c(0, muc_week[1:nrow(muc_week)-1,"Total"])
+# Count new deaths
+muc_week$New_deceased = muc_week$Deceased -
+  c(0, muc_week[1:nrow(muc_week)-1,"Deceased"])
+
+###############################################################################
+# Set up KoCo data
+
+koco_data$Result_bin = ifelse(koco_data$R_quant >= cutoff$new$Roche, 1, 0)
+koco_data$Date = as.Date(koco_data$VisitDate, format = c("%Y-%m-%d"))
+koco_data$Week = lubridate::isoweek(koco_data$Date)
+# Sort by date
+koco_data = koco_data[order(koco_data$Date),]
+
+# Attach all week 24 to week 23 due to low case numbers thereafter and
+#  change in Munich data
+koco_data[koco_data$Week>23, "Week"] = 23
+
+# Group per date
+koco_date = koco_data %>% group_by(Date) %>%
+  summarise(Recruits=n(), Cases=sum(Result_bin))
+koco_date$Recruits_cumsum = cumsum(koco_date$Recruits)
+koco_date$Cases_cumsum = cumsum(koco_date$Cases)
+
+# Group per week
+koco_week =
+  koco_data %>% group_by(Week) %>%
+  summarise(Recruits=n(), Cases=sum(Result_bin), Date=first(Date))
+koco_week$Recruits_cumsum = cumsum(koco_week$Recruits)
+koco_week$Cases_cumsum = cumsum(koco_week$Cases)
+
+# Normalize
+koco_date$Cases_rel = koco_date$Cases / koco_date$Recruits
+koco_week$Cases_rel = koco_week$Cases / koco_week$Recruits
+
+# Uncertainties
+koco_week[c("Cases_rel_lci", "Cases_rel_uci")] =
+  epitools::pois.exact(koco_week$Cases, koco_week$Recruits,
+                       conf.level = 0.95)[c("lower", "upper")]
+
+roche_sero_estimates = read.csv(
+  here_koco("Analysis Data Sets", "Roche_sero_estimates.csv"))
+rownames(roche_sero_estimates) =
+  paste(roche_sero_estimates[,"group1"],
+        roche_sero_estimates[,"group2"], sep=" & ")
+adjusted_weighted_estimate =
+  roche_sero_estimates["Sampling Weighted & Adjusted", "ppest"] / 100
+adjusted_weighted_lci =
+  roche_sero_estimates["Sampling Weighted & Adjusted", "pplci"] / 100
+adjusted_weighted_uci =
+  roche_sero_estimates["Sampling Weighted & Adjusted", "ppuci"] / 100
+
+# Icons
+here_images = function (...) here::here("Icons", ...)
+icon_antibody = png::readPNG(here_images("icon_antibody.png"))
+icon_coronavirus = png::readPNG(here_images("icon_coronavirus.png"))
+icon_book = png::readPNG(here_images("icon_book.png"))
+g_antibody = grid::rasterGrob(icon_antibody)
+g_coronavirus = grid::rasterGrob(icon_coronavirus)
+g_book = grid::rasterGrob(icon_book)
+ggplot() + annotation_custom(g_antibody)
+ggplot() + annotation_custom(g_coronavirus)
+ggplot() + annotation_custom(g_book)
+```
+
+## Cumulatives
+
+```{r, fig.width=3.5, fig.height=2.5}
+#ggplot(data=muc_date, aes(x=Date, y=Total), col=col_muc) +
+#  geom_line(col=col_muc) + geom_point(col=col_muc)
+plt_muc_weeklycumu = ggplot(data=muc_week, aes(x=Date, y=Total)) +
+  geom_line(col=col_muc) + geom_point(col=col_muc) +
+  #theme(axis.text.x = element_text(angle = 90)) +
+  #scale_x_date(limits = date_range, labels = scales::date_format("%b %d"))
+  scale_x_date(
+    limits = date_range, breaks=date_breaks, labels = date_break_labels) +
+  theme(axis.title.x = element_blank()) +
+  labs(y="Kumulative # \n PCR-positiver Tests", x="")
+plt_muc_weeklycumu
+ggsave(here_out("DZ_muc_weeklycumu.png"), width=3.5, height=2.5, dpi=720)
+ggsave(here_out("DZ_muc_weeklycumu.pdf"), width=3.5, height=2.5, dpi=720)
+
+#ggplot(data=koco_date, aes(x=Date, y=Recruits_cumsum)) +
+#  geom_line(col=col_koco) + geom_point(col=col_koco)
+ggplot(data=koco_week, aes(x=Date, y=Recruits_cumsum)) +
+  geom_line(col=col_koco) + geom_point(col=col_koco)
+
+#ggplot(data=koco_date, aes(x=Date, y=Cases_cumsum)) +
+#  geom_line(col=col_koco) + geom_point(col=col_koco)
+ggplot(data=koco_week, aes(x=Date, y=Cases_cumsum)) +
+  geom_line(col=col_koco) + geom_point(col=col_koco)
+```
+
+## Relative case numbers
+
+```{r, fig.width=3.5, fig.height=2.5}
+ggplot(data=koco_date, aes(x=Date, y=Cases_rel)) +
+  geom_line(col=col_koco) + geom_point(col=col_koco)
+plt_koco_weeklyfrac = ggplot(data=koco_week, aes(x=Date, y=Cases_rel)) +
+  geom_rect(
+    ymin=adjusted_weighted_lci, ymax=adjusted_weighted_uci,
+    xmin=as.Date("2020-04-06"), xmax=Inf, fill="grey30", alpha=0.01) +
+  geom_segment(
+    y = adjusted_weighted_estimate, yend = adjusted_weighted_estimate,
+    x=as.Date("2020-04-06"), xend=Inf, col="grey30") +
+  geom_line(col=col_koco) + geom_point(col=col_koco) +
+  geom_line(aes(y=Cases_rel_lci), col=col_koco, linetype="dashed") +
+  geom_line(aes(y=Cases_rel_uci), col=col_koco, linetype="dashed") +
+  scale_y_continuous(
+    limits = c(0, max(koco_week$Cases_rel_uci)), labels = scales::percent) +
+  #scale_x_date(limits = date_range, labels = scales::date_format("%b %d"))
+  scale_x_date(
+    limits = date_range, breaks=date_breaks, labels = date_break_labels) +
+  theme(axis.title.x = element_blank()) +
+  labs(y="Prozentsatz positiver\nAntikörper-Tests", x="")
+plt_koco_weeklyfrac
+ggsave(here_out("DZ_koco_weeklyfrac.png"), width=3.5, height=2.5, dpi=720)
+ggsave(here_out("DZ_koco_weeklyfrac.pdf"), width=3.5, height=2.5, dpi=720)
+```
+
+## New cases
+
+```{r, fig.width=3.5, fig.height=2.5}
+
+ggplot(data=muc_date, aes(x=Date, y=New_cases)) +
+  geom_line(col=col_muc) + geom_point(col=col_muc)
+plt_muc_weeklycases = ggplot(data=muc_week, aes(x=Date, y=New_cases)) +
+  geom_line(col=col_muc) + geom_point(col=col_muc) +
+  #scale_x_date(limits = date_range, labels = scales::date_format("%b %d"))
+  scale_x_date(limits = date_range, breaks=date_breaks, labels = date_break_labels) +
+  theme(axis.title.x = element_blank()) +
+  labs(y="# Offiziell registrierter\nPCR-positiver Tests", x="")
+plt_muc_weeklycases
+ggsave(here_out("DZ_muc_weeklycases.png"), width=3.5, height=2.5, dpi=720)
+ggsave(here_out("DZ_muc_weeklycases.pdf"), width=3.5, height=2.5, dpi=720)
+
+ggplot(data=koco_date, aes(x=Date, y=Recruits)) +
+  geom_line(col=col_koco) + geom_point(col=col_koco)
+plt_koco_weeklyrecruits = ggplot(data=koco_week, aes(x=Date, y=Recruits)) +
+  geom_line(col=col_koco) + geom_point(col=col_koco) +
+  #scale_x_date(limits = date_range, labels = scales::date_format("%b %d"))
+  scale_x_date(limits = date_range, breaks=date_breaks, labels = date_break_labels) +
+  scale_y_continuous(limits = c(0, max(koco_week$Recruits))) +
+  theme(axis.title.x = element_blank()) +
+  labs(y="# KoCo19 Teilnehmer\npro Woche", x="")
+plt_koco_weeklyrecruits
+ggsave(here_out("DZ_koco_weeklyrecruits.png"), width=3.5, height=2.5, dpi=720)
+ggsave(here_out("DZ_koco_weeklyrecruits.pdf"), width=3.5, height=2.5, dpi=720)
+
+ggplot(data=koco_date, aes(x=Date, y=Cases)) +
+  geom_line(col=col_koco) + geom_point(col=col_koco)
+ggplot(data=koco_week, aes(x=Date, y=Cases)) +
+  geom_line(col=col_koco) + geom_point(col=col_koco)
+```
+
+## Prevalence
+
+```{r, fig.width=2.5, fig.height=3.5}
+# Munich population size >= 14 years
+muc_pop_size = 1561720 # 1369444
+muc_estimate = muc_date[nrow(muc_date), "Total"] / muc_pop_size
+
+rounded_labels <- function(x) sprintf("%.1f%%", x*100)
+
+plt_prevalence = ggplot(
+  data.frame(Source=factor(c("Offiziell", "KoCo19"),
+                           levels=c("Offiziell", "KoCo19")),
+             Prevalence=c(muc_estimate, adjusted_weighted_estimate),
+             Image=c(here_images("icon_coronavirus.png"),
+                     here_images("icon_antibody.png"))), 
+       aes(x=Source, y=Prevalence, col=Source, fill=Source)) +
+  geom_bar(stat="identity", alpha=0.5) +
+  scale_color_manual(values=c(col_muc, col_koco)) +
+  scale_fill_manual(values=c(col_muc, col_koco)) +
+  theme(legend.position = "none", axis.title.x=element_blank()) +
+  annotation_custom(g_coronavirus, xmin=0.8, xmax=1.2, ymin=0.018, ymax=Inf) +
+  annotation_custom(g_antibody, xmin=1.8, xmax=2.2, ymin=0.018, ymax=Inf) +
+  geom_segment(
+    x = 1.1, y = muc_estimate+0.0003,
+    xend = 1.1, yend = adjusted_weighted_estimate-0.0003,
+    lineend = "round", linejoin = "round",
+    arrow = arrow(length = unit(0.08, "npc")),
+    colour = "grey40") +
+  geom_segment(
+    xend = 1.1, yend = muc_estimate+0.0003,
+    x = 1.1, y = adjusted_weighted_estimate-0.0003,
+    lineend = "round", linejoin = "round",
+    arrow = arrow(length = unit(0.08, "npc")),
+    colour = "grey40") +
+  annotate(geom="text", x= 0.9, y=muc_estimate + (adjusted_weighted_estimate - muc_estimate) / 2,
+           label=sprintf("≈%.0f-fach", adjusted_weighted_estimate / muc_estimate),
+           angle=90) +
+  scale_y_continuous(limits=c(0,0.02), labels=rounded_labels) +
+  labs(x="", y="Prävalenz-Schätzer")
+plt_prevalence
+ggsave(here_out("DZ_prevalence.png"), width=2.5, height=3.5, dpi=720)
+ggsave(here_out("DZ_prevalence.pdf"), width=2.5, height=3.5, dpi=720)
+```
+
+## Combined
+
+```{r, fig.width=10, fig.height=5}
+# Margin
+mg=0.3
+
+plt_1 = plot_grid(
+  plot_grid(
+    plot_grid(
+      ggplot() + annotation_custom(g_coronavirus) + theme_minimal(),
+      title_plot("A", plt_muc_weeklycases) +
+        theme(plot.margin = unit(c(mg,mg,mg,mg), "cm")),
+      title_plot("B", plt_muc_weeklycumu) +
+        theme(plot.margin = unit(c(mg,mg,mg,mg), "cm")),
+      nrow = 1, rel_widths = c(1.2, 5, 5)),
+    plot_grid(
+      ggplot() + annotation_custom(g_antibody) + theme_minimal(),
+      title_plot("C", plt_koco_weeklyrecruits) +
+        theme(plot.margin = unit(c(mg,mg,mg,mg), "cm")),
+      title_plot("D", plt_koco_weeklyfrac) +
+        theme(plot.margin = unit(c(mg,mg,mg,mg), "cm")),
+      nrow = 1, rel_widths = c(1.2, 5, 5)),
+    nrow=2),
+  plot_grid(
+    NULL,
+    title_plot("E", plt_prevalence) +
+      theme(plot.margin = unit(c(mg,mg,mg,mg), "cm")),
+    NULL, rel_heights = c(1, 5, 1), ncol = 1),
+  nrow=1, rel_widths = c(4, 1.2)
+)
+plt_1
+ggsave(here_out("DZ_fig1.png"), width=10, height=5, dpi=720)
+ggsave(here_out("DZ_fig1.pdf"), width=10, height=5, dpi=720)
+```
+
+# Figure 2 (Mortality)
+
+## Overall mortality
+
+```{r, fig.width=3.5, fig.height=3}
+mort_data = read.csv(here_koco("Analysis Data Sets", "mor_muc.csv"))
+mort_data$Mean = rowMeans(mort_data[,c("Y2016", "Y2017", "Y2018", "Y2019")])
+mort_data = mort_data %>% dplyr::rename(
+  "Week"="X", "2016"="Y2016", "2017"="Y2017", "2018"="Y2018", "2019"="Y2019",
+  "2020"="Y2020")
+mort_data$Mean_2016_20 = NULL
+
+# Restrict to week < 24
+# Exclude week 24, as the death data must have been corrected there
+mort_data = mort_data[which(mort_data$Week < 24),]
+
+# Add dates to mort_data
+mort_data = inner_join(
+  mort_data, muc_week[,c("Date" ,"Week", "New_deceased")], by = "Week")
+
+# Calculate excess mortalities
+mort_data$Excess2016 = mort_data$`2016`- mort_data$`Mean`
+mort_data$Excess2017 = mort_data$`2017`- mort_data$`Mean`
+mort_data$Excess2018 = mort_data$`2018`- mort_data$`Mean`
+mort_data$Excess2019 = mort_data$`2019`- mort_data$`Mean`
+mort_data$Excess2020 = mort_data$`2020`- mort_data$`Mean`
+
+# To long format for figure
+mort_data_long = mort_data %>% 
+  dplyr::rename("Mittelwert"="Mean") %>%
+  reshape2::melt(
+   id=c("Week", "Date", "Excess2016", "Excess2017", "Excess2018",
+        "Excess2019", "Excess2020", "New_deceased")) %>%
+  dplyr::rename("Year"="variable")
+
+# For correct order
+mort_data_long$Year = factor(
+  mort_data_long$Year,
+  levels = c("2016", "2017", "2018", "2019", "Mittelwert", "2020"))
+
+plt_deaths = ggplot(mort_data_long,
+                    aes(x=Date, col=`Year`, fill=`Year`, y=value)) +
+  geom_line() + geom_point() +
+  scale_y_continuous(limits=c(0, max(mort_data_long$value)+2)) +
+  scale_x_date(limits = date_range, breaks=date_breaks,
+               labels = date_break_labels) +
+  scale_color_manual(
+    values = c("grey65", "grey50", "grey35", "grey20",
+               col_green, col_yellow)) +
+  labs(x="", y="Wöchentliche Todesfälle") +
+  theme(legend.title=element_blank(),
+        legend.position=c(0.5, 0.2),
+        legend.direction = "horizontal",
+        axis.title.x = element_blank())
+plt_deaths
+ggsave(here_out("DZ_deaths.png"), width=3.5, height=3, dpi=720)
+ggsave(here_out("DZ_deaths.pdf"), width=3.5, height=3, dpi=720)
+```
+
+## Excess mortality
+
+```{r, fig.width=3.5, fig.height=3}
+# To long format for figure
+mort_data_long = mort_data[,c("Date", "Excess2020", "New_deceased")] %>%
+  dplyr::rename("Übersterblichkeit\nMärz-Juni 2020"="Excess2020",
+                "SARS-CoV-2 assozi-\nierte Todesfälle"="New_deceased") %>%
+  reshape2::melt(id="Date") %>%
+  dplyr::rename("Year"="variable")
+
+plt_excess = ggplot(mort_data_long, aes(x=Date, col=`Year`, fill=`Year`,
+                                        y=value)) +
+  geom_line() + geom_point() +
+  geom_area(
+    #data=mort_data_long[mort_data_long$Year=="Übersterblichkeit\nMärz-Juni 2020",],
+    alpha=0.3, position="identity", show.legend = FALSE) +
+  geom_line() + geom_point() +
+  scale_x_date(limits = date_range, breaks=date_breaks,
+               labels = date_break_labels) +
+  scale_color_manual(values = c(col_books, col_muc)) +
+  scale_fill_manual(values = c(col_books, col_muc)) +
+  geom_hline(yintercept=0, linetype="dotted") +
+  scale_y_continuous(limits=c(-50,max(mort_data_long$value))) +
+  labs(x="", y="Abweichungen in der Anzahl\nwöchentlicher Todesfälle") +
+  theme(legend.title=element_blank(),
+        legend.position=c(0.5, 0.2),
+        legend.background = element_blank(),
+        # No other way to increase the spacing
+        legend.key.height=unit(0.8, 'cm'),
+        #legend.direction="vertical",
+        axis.title.x = element_blank())
+plt_excess
+ggsave(here_out("DZ_excess.png"), width=3.5, height=3, dpi=720)
+ggsave(here_out("DZ_excess.pdf"), width=3.5, height=3, dpi=720)
+```
+
+## Totals
+
+```{r, fig.width=3.5, fig.height=3}
+# Total excess mortalitiy in the period of consideration
+total_excess_mortality = sum(mort_data$Excess2020)
+# Total Covid related deaths in the period of consideration
+total_covid_deaths = muc_week[nrow(muc_week), "Deceased"]
+# Category labels
+labels = c("Übersterblichkeit\nMärz-Juni 2020",
+           "SARS-CoV-2 assozi-\nierte Todesfälle")
+
+plt_total_deaths = ggplot(
+  data.frame(Source=factor(labels, levels=labels),
+             Total=c(total_excess_mortality, total_covid_deaths),
+             Image=c(here_images("icon_book.png"),
+                     here_images("icon_coronavirus.png"))),
+       aes(x=Source, y=Total, col=Source, fill=Source)) +
+  geom_bar(stat="identity", alpha=0.5) +
+  scale_color_manual(values=c(col_books, col_muc)) +
+  scale_fill_manual(values=c(col_books, col_muc)) +
+  scale_y_continuous(limits=c(0,240)) +
+  annotation_custom(g_book, xmin=0.8, xmax=1.2, ymin=220, ymax=Inf) +
+  annotation_custom(g_coronavirus, xmin=1.8, xmax=2.2, ymin=220, ymax=Inf) +
+  theme(legend.position = "none", axis.title.x=element_blank()) +
+  labs(x="", y="Gesamtzahl von Todesfällen")
+plt_total_deaths
+ggsave(here_out("DZ_total_deaths.png"), width=3.5, height=3, dpi=720)
+ggsave(here_out("DZ_total_deaths.pdf"), width=3.5, height=3, dpi=720)
+```
+
+## Combined
+
+```{r, fig.width=10, fig.height=3}
+plt_2= plot_grid(
+  title_plot("A", plt_deaths) +
+    theme(plot.margin = unit(c(mg,mg,mg,mg), "cm")),
+  title_plot("B", plt_excess) +
+    theme(plot.margin = unit(c(mg,mg,mg,mg), "cm")),
+  title_plot("C", plt_total_deaths) +
+    theme(plot.margin = unit(c(mg,mg,mg,mg), "cm")),
+  nrow = 1, rel_widths = c(4, 4, 4)
+)
+plt_2
+ggsave(here_out("DZ_fig2.png"), width=10, height=3, dpi=720)
+ggsave(here_out("DZ_fig2.pdf"), width=10, height=3, dpi=720)
+```

@@ -1,0 +1,676 @@
+---
+title: "Figures DZ"
+author: "Mercè Garí"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(ggplot2)
+
+here_r = function (...) here::here("Statistics", "R", ...)
+here_koco = function (...) here::here("KoCo19_Datasets", ...)
+here_epi_out = function (...) here::here("Epi_out", ...)
+
+# Setup
+source(here_r("setup.R"))
+
+# Install packages
+
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(ggthemes)
+library(GGally)
+library(colorspace)
+library(cowplot)
+library(readxl)
+library(ggpmisc)
+library(forcats)
+
+green.lmu <- "#59ab7c"
+orange.lmu <- "#efae59"
+red.lmu <- "#bf635d"
+blue.lmu <- "#59a3b2"
+```
+
+```{r}
+
+# Load data
+#------------------------- KoCo Baseline
+d <- read.csv(here_koco("Analysis Data Sets", "Koco_baseline.csv"),
+              stringsAsFactors=F)
+
+
+# Sensibility and specificity of Roche optimised
+# (from prevalence_estimates.csv in AlgorithmResults)
+spec <- 0.997204100652377
+sens <- 0.886010362694301
+
+```
+
+
+### Figure 3 - horizontal - limit 20
+
+```{r, fig.width = 8, fig.height = 3, results = FALSE}
+
+
+fig3a <- d %>%
+  select(Agegroup, Roche_Result_new) %>%
+  left_join(d %>%
+              group_by(Agegroup) %>%
+              summarise(n=n())) %>%
+  rename(Alter = Agegroup) %>%
+  mutate(order.Alter = as.numeric(as.factor(Alter))) %>%
+  mutate(Alter = ifelse(Alter == "80+", ">80", Alter)) %>%
+  mutate(Alter = ifelse(Alter == "0-19", "14-19", Alter)) %>%
+  mutate(Alter = paste(Alter, " J. (n=", n, ")", sep="")) %>%
+  mutate(Alter = fct_reorder(Alter, order.Alter)) %>%
+  group_by(Alter, Roche_Result_new) %>%
+  summarise(num = n()) %>%
+  mutate(Prev.crude = num/sum(num)) %>%
+  ungroup() %>%
+  mutate(Prev.adj = ((Prev.crude + (spec - 1)) / (sens + spec - 1)),
+         Percentage = Prev.adj * 100) %>%
+  filter(Roche_Result_new %in% "Positive") %>%
+  ggplot(aes(x=fct_rev(Alter), y=Percentage)) +
+  geom_bar(alpha=0.6, stat="identity", 
+           color=blue.lmu, fill=blue.lmu) +
+  ylab("Anteil Antikörper-pos. [%]") +
+  coord_flip() +
+  xlab("") +
+  ylim(0,22) +
+  ggtitle("Alter")
+fig3a
+
+
+fig3b <- d %>%
+  select(Sex, Roche_Result_new) %>%
+  left_join(d %>%
+              group_by(Sex) %>%
+              summarise(n=n())) %>%
+  mutate(Geschlecht = factor(Sex),
+         Geschlecht = case_when(
+           Geschlecht == "Female" ~ "Weiblich",
+           Geschlecht == "Male" ~ "Männlich")) %>%
+  mutate(Geschlecht = paste(Geschlecht, " (n=", n, ")", sep="")) %>%
+  group_by(Geschlecht, Roche_Result_new) %>%
+  summarise(num = n()) %>%
+  mutate(Prev.crude = num/sum(num)) %>%
+  ungroup() %>%
+  mutate(Prev.adj = ((Prev.crude + spec - 1) / (sens + spec - 1)),
+         Percentage = Prev.adj * 100) %>%
+    filter(Roche_Result_new %in% "Positive") %>%
+  ggplot(aes(x=Geschlecht, y=Percentage)) +
+  geom_bar(alpha=0.6, stat="identity",
+           color=blue.lmu, fill=blue.lmu) +
+  ylab("Anteil Antikörper-pos. [%]") +
+  coord_flip() +
+  ylim(0,22) +
+  xlab("") + ggtitle("Geschlecht")
+fig3b
+
+# Respiratory allergies (not-sure category in the "no" category)
+fig3c <- d %>%
+  filter(!is.na(HealthStatus_Self_Allergies_Respiratory)) %>%
+  select(HealthStatus_Self_Allergies_Respiratory, Roche_Result_new) %>%
+  left_join(d %>%
+              filter(!is.na(HealthStatus_Self_Allergies_Respiratory)) %>%
+              group_by(HealthStatus_Self_Allergies_Respiratory) %>%
+              summarise(n=n())) %>%
+  rename(Atemwegsallergien = HealthStatus_Self_Allergies_Respiratory) %>%
+  mutate(Atemwegsallergien = factor(Atemwegsallergien, levels=c("No", "Yes"),
+                            labels=c("Nein", "Ja"))) %>%
+  mutate(Atemwegsallergien = paste(Atemwegsallergien, " (n=", n, ")", sep="")) %>%
+  group_by(Atemwegsallergien, Roche_Result_new) %>%
+  summarise(num = n()) %>%
+  mutate(Prev.crude = num/sum(num)) %>%
+  ungroup() %>%
+  mutate(Prev.adj = ((Prev.crude + spec - 1) / (sens + spec - 1)),
+         Percentage = Prev.adj * 100) %>%
+  filter(Roche_Result_new %in% "Positive") %>%
+  filter(!is.na(Atemwegsallergien)) %>%
+  ggplot(aes(x=fct_rev(Atemwegsallergien), y=Percentage)) +
+  geom_bar(alpha=0.6, stat="identity", 
+           color=blue.lmu, fill=blue.lmu) +
+  ylab("Anteil Antikörper-pos. [%]") +
+  coord_flip() +
+  xlab("") +
+  ylim(0,22) + ggtitle("Atemwegsallergien")
+fig3c
+
+# Loss smell/taste (not-sure category in the "no" category)
+fig3d <- d %>%
+  filter(!is.na(Symptoms_past2w_SenseLoss.Smell.Taste.)) %>%
+  select(Symptoms_past2w_SenseLoss.Smell.Taste., Roche_Result_new) %>%
+  left_join(d %>%
+              filter(!is.na(Symptoms_past2w_SenseLoss.Smell.Taste.)) %>%
+              group_by(Symptoms_past2w_SenseLoss.Smell.Taste.) %>%
+              summarise(n=n())) %>%
+  rename(`Verlust von Geruchs-/Geschmackssinn` = Symptoms_past2w_SenseLoss.Smell.Taste.) %>%
+  mutate(`Verlust von Geruchs-/Geschmackssinn` = factor(`Verlust von Geruchs-/Geschmackssinn`, levels=c("No", "Yes"),
+                            labels=c("Nein", "Ja"))) %>%
+  mutate(`Verlust von Geruchs-/Geschmackssinn` = paste(`Verlust von Geruchs-/Geschmackssinn`, " (n=", n, ")", sep="")) %>%
+  group_by(`Verlust von Geruchs-/Geschmackssinn`, Roche_Result_new) %>%
+  summarise(num = n()) %>%
+  mutate(Prev.crude = num/sum(num)) %>%
+  ungroup() %>%
+  mutate(Prev.adj = ((Prev.crude + spec - 1) / (sens + spec - 1)),
+         Percentage = Prev.adj * 100) %>%
+  filter(Roche_Result_new %in% "Positive") %>%
+  filter(!is.na(`Verlust von Geruchs-/Geschmackssinn`)) %>%
+  ggplot(aes(x=fct_rev(`Verlust von Geruchs-/Geschmackssinn`), y=Percentage)) +
+  geom_bar(alpha=0.6, stat="identity", 
+           color=blue.lmu, fill=blue.lmu) +
+  ylab("Anteil Antikörper-pos. [%]") +
+  coord_flip() +
+  xlab("") +
+  ylim(0,22) + ggtitle("Verlust von Geruchs-/Geschmackssinn")
+fig3d
+
+
+
+
+plot_grid(fig3a, fig3b, fig3c, fig3d,
+          labels=c("A", "B", "C", "D"),
+          ncol=1, align="v",
+          rel_heights = c(0.34, 0.2, 0.2, 0.2))
+ggsave("DZ-Figure-3-horizontal-limit20.pdf", width=8, height=6)
+ggsave("DZ-Figure-3-horizontal-limit20.png", width=8, height=6)
+
+
+```
+
+
+### Figure 3 - horizontal - limit default
+
+```{r, fig.width = 8, fig.height = 3, results = FALSE}
+
+
+fig3a <- d %>%
+  select(Agegroup, Roche_Result_new) %>%
+  left_join(d %>%
+              group_by(Agegroup) %>%
+              summarise(n=n())) %>%
+  rename(Alter = Agegroup) %>%
+  mutate(order.Alter = as.numeric(as.factor(Alter))) %>%
+  mutate(Alter = ifelse(Alter == "80+", ">80", Alter)) %>%
+  mutate(Alter = ifelse(Alter == "0-19", "14-19", Alter)) %>%
+  mutate(Alter = paste(Alter, " J. (n=", n, ")", sep="")) %>%
+  mutate(Alter = fct_reorder(Alter, order.Alter)) %>%
+  group_by(Alter, Roche_Result_new) %>%
+  summarise(num = n()) %>%
+  mutate(Prev.crude = num/sum(num)) %>%
+  ungroup() %>%
+  mutate(Prev.adj = ((Prev.crude + (spec - 1)) / (sens + spec - 1)),
+         Percentage = Prev.adj * 100) %>%
+  filter(Roche_Result_new %in% "Positive") %>%
+  ggplot(aes(x=fct_rev(Alter), y=Percentage)) +
+  geom_bar(alpha=0.6, stat="identity", 
+           color=blue.lmu, fill=blue.lmu) +
+  ylab("Anteil Antikörper-pos. [%]") +
+  coord_flip() +
+  xlab("") +
+  ggtitle("Alter")
+fig3a
+
+
+fig3b <- d %>%
+  select(Sex, Roche_Result_new) %>%
+  left_join(d %>%
+              group_by(Sex) %>%
+              summarise(n=n())) %>%
+  mutate(Geschlecht = factor(Sex),
+         Geschlecht = case_when(
+           Geschlecht == "Female" ~ "Weiblich",
+           Geschlecht == "Male" ~ "Männlich")) %>%
+  mutate(Geschlecht = paste(Geschlecht, " (n=", n, ")", sep="")) %>%
+  group_by(Geschlecht, Roche_Result_new) %>%
+  summarise(num = n()) %>%
+  mutate(Prev.crude = num/sum(num)) %>%
+  ungroup() %>%
+  mutate(Prev.adj = ((Prev.crude + spec - 1) / (sens + spec - 1)),
+         Percentage = Prev.adj * 100) %>%
+    filter(Roche_Result_new %in% "Positive") %>%
+  ggplot(aes(x=Geschlecht, y=Percentage)) +
+  geom_bar(alpha=0.6, stat="identity",
+           color=blue.lmu, fill=blue.lmu) +
+  ylab("Anteil Antikörper-pos. [%]") +
+  coord_flip() +
+  xlab("") + ggtitle("Geschlecht")
+fig3b
+
+# Respiratory allergies (not-sure category in the "no" category)
+fig3c <- d %>%
+  filter(!is.na(HealthStatus_Self_Allergies_Respiratory)) %>%
+  select(HealthStatus_Self_Allergies_Respiratory, Roche_Result_new) %>%
+  left_join(d %>%
+              filter(!is.na(HealthStatus_Self_Allergies_Respiratory)) %>%
+              group_by(HealthStatus_Self_Allergies_Respiratory) %>%
+              summarise(n=n())) %>%
+  rename(Atemwegsallergien = HealthStatus_Self_Allergies_Respiratory) %>%
+  mutate(Atemwegsallergien = factor(Atemwegsallergien, levels=c("No", "Yes"),
+                            labels=c("Nein", "Ja"))) %>%
+  mutate(Atemwegsallergien = paste(Atemwegsallergien, " (n=", n, ")", sep="")) %>%
+  group_by(Atemwegsallergien, Roche_Result_new) %>%
+  summarise(num = n()) %>%
+  mutate(Prev.crude = num/sum(num)) %>%
+  ungroup() %>%
+  mutate(Prev.adj = ((Prev.crude + spec - 1) / (sens + spec - 1)),
+         Percentage = Prev.adj * 100) %>%
+  filter(Roche_Result_new %in% "Positive") %>%
+  filter(!is.na(Atemwegsallergien)) %>%
+  ggplot(aes(x=fct_rev(Atemwegsallergien), y=Percentage)) +
+  geom_bar(alpha=0.6, stat="identity", 
+           color=blue.lmu, fill=blue.lmu) +
+  ylab("Anteil Antikörper-pos. [%]") +
+  coord_flip() +
+  xlab("") +
+  ggtitle("Atemwegsallergien")
+fig3c
+
+# Loss smell/taste (not-sure category in the "no" category)
+fig3d <- d %>%
+  filter(!is.na(Symptoms_past2w_SenseLoss.Smell.Taste.)) %>%
+  select(Symptoms_past2w_SenseLoss.Smell.Taste., Roche_Result_new) %>%
+  left_join(d %>%
+              filter(!is.na(Symptoms_past2w_SenseLoss.Smell.Taste.)) %>%
+              group_by(Symptoms_past2w_SenseLoss.Smell.Taste.) %>%
+              summarise(n=n())) %>%
+  rename(`Verlust von Geruchs-/Geschmackssinn` = Symptoms_past2w_SenseLoss.Smell.Taste.) %>%
+  mutate(`Verlust von Geruchs-/Geschmackssinn` = factor(`Verlust von Geruchs-/Geschmackssinn`, levels=c("No", "Yes"),
+                            labels=c("Nein", "Ja"))) %>%
+  mutate(`Verlust von Geruchs-/Geschmackssinn` = paste(`Verlust von Geruchs-/Geschmackssinn`, " (n=", n, ")", sep="")) %>%
+  group_by(`Verlust von Geruchs-/Geschmackssinn`, Roche_Result_new) %>%
+  summarise(num = n()) %>%
+  mutate(Prev.crude = num/sum(num)) %>%
+  ungroup() %>%
+  mutate(Prev.adj = ((Prev.crude + spec - 1) / (sens + spec - 1)),
+         Percentage = Prev.adj * 100) %>%
+  filter(Roche_Result_new %in% "Positive") %>%
+  filter(!is.na(`Verlust von Geruchs-/Geschmackssinn`)) %>%
+  ggplot(aes(x=fct_rev(`Verlust von Geruchs-/Geschmackssinn`), y=Percentage)) +
+  geom_bar(alpha=0.6, stat="identity", 
+           color=blue.lmu, fill=blue.lmu) +
+  ylab("Anteil Antikörper-pos. [%]") +
+  coord_flip() +
+  xlab("") +
+  ggtitle("Verlust von Geruchs-/Geschmackssinn")
+fig3d
+
+
+
+
+plot_grid(fig3a, fig3b, fig3c, fig3d,
+          labels=c("A", "B", "C", "D"), 
+          # labels=c("A) Alter", "B) Geschlecht", 
+          #          "C) Atemwegsallergien", "D) Verlust von Geruchs-/Geschmackssinn"),
+          ncol=1, align="v",
+          rel_heights = c(0.34, 0.2, 0.2, 0.2))
+ggsave("DZ-Figure-3-horizontal-limit-default.pdf", width=8, height=6)
+ggsave("DZ-Figure-3-horizontal-limit-default.png", width=8, height=6)
+
+```
+
+### Figure 3 - vertical - limit 20
+
+```{r, fig.width = 8, fig.height = 3, results = FALSE}
+
+
+fig3a <- d %>%
+  select(Agegroup, Roche_Result_new) %>%
+  rename(Alter = Agegroup) %>%
+  mutate(Alter = factor(Alter, levels=c("0-19", "20-34", "35-49", "50-64", "65-79", "80+"),
+                        labels=c("14-19", "20-34", "35-49", "50-64", "65-79", "80+"))) %>%
+  group_by(Alter, Roche_Result_new) %>%
+  summarise(num = n()) %>%
+  mutate(Prev.crude = num/sum(num)) %>%
+  ungroup() %>%
+  mutate(Prev.adj = ((Prev.crude + (spec - 1)) / (sens + spec - 1)),
+         Percentage = Prev.adj * 100) %>%
+  filter(Roche_Result_new %in% "Positive") %>%
+  ggplot(aes(x=Alter, y=Percentage)) +
+  geom_bar(alpha=0.6, stat="identity", 
+           color=blue.lmu, fill=blue.lmu) +
+  ylab("Anteil Antikörper-pos. [%]") +
+  ylim(0,22)
+fig3a
+
+
+fig3b <- d %>%
+  select(Sex, Roche_Result_new) %>%
+  mutate(Geschlecht = factor(Sex),
+         Geschlecht = case_when(
+           Geschlecht == "Female" ~ "Weiblich",
+           Geschlecht == "Male" ~ "Männlich")) %>%
+  group_by(Geschlecht, Roche_Result_new) %>%
+  summarise(num = n()) %>%
+  mutate(Prev.crude = num/sum(num)) %>%
+  ungroup() %>%
+  mutate(Prev.adj = ((Prev.crude + spec - 1) / (sens + spec - 1)),
+         Percentage = Prev.adj * 100) %>%
+    filter(Roche_Result_new %in% "Positive") %>%
+  ggplot(aes(x=Geschlecht, y=Percentage)) +
+  geom_bar(alpha=0.6, stat="identity",
+           color=blue.lmu, fill=blue.lmu) +
+  ylab("Anteil Antikörper-pos. [%]") +
+  ylim(0,22)
+fig3b
+
+# Respiratory allergies (not-sure category in the "no" category)
+fig3c <- d %>%
+  select(HealthStatus_Self_Allergies_Respiratory, Roche_Result_new) %>%
+  rename(Atemwegsallergien = HealthStatus_Self_Allergies_Respiratory) %>%
+  mutate(Atemwegsallergien = factor(Atemwegsallergien, levels=c("No", "Yes"),
+                            labels=c("Nein", "Ja"))) %>%
+  group_by(Atemwegsallergien, Roche_Result_new) %>%
+  summarise(num = n()) %>%
+  mutate(Prev.crude = num/sum(num)) %>%
+  ungroup() %>%
+  mutate(Prev.adj = ((Prev.crude + spec - 1) / (sens + spec - 1)),
+         Percentage = Prev.adj * 100) %>%
+  filter(Roche_Result_new %in% "Positive") %>%
+  filter(!is.na(Atemwegsallergien)) %>%
+  ggplot(aes(x=Atemwegsallergien, y=Percentage)) +
+  geom_bar(alpha=0.6, stat="identity", 
+           color=blue.lmu, fill=blue.lmu) +
+  ylab("Anteil Antikörper-pos. [%]") +
+  ylim(0,22)
+fig3c
+
+# Loss smell/taste (not-sure category in the "no" category)
+fig3d <- d %>%
+  select(Symptoms_past2w_SenseLoss.Smell.Taste., Roche_Result_new) %>%
+  rename(`Verlust von Geruchs-/Geschmackssinn` = Symptoms_past2w_SenseLoss.Smell.Taste.) %>%
+  mutate(`Verlust von Geruchs-/Geschmackssinn` = factor(`Verlust von Geruchs-/Geschmackssinn`,
+                                                levels=c("No", "Yes"),
+                                                labels=c("Nein", "Ja"))) %>%
+  group_by(`Verlust von Geruchs-/Geschmackssinn`, Roche_Result_new) %>%
+  summarise(num = n()) %>%
+  mutate(Prev.crude = num/sum(num)) %>%
+  ungroup() %>%
+  mutate(Prev.adj = ((Prev.crude + spec - 1) / (sens + spec - 1)),
+         Percentage = Prev.adj * 100) %>%
+  filter(Roche_Result_new %in% "Positive") %>%
+  filter(!is.na(`Verlust von Geruchs-/Geschmackssinn`)) %>%
+  ggplot(aes(x=`Verlust von Geruchs-/Geschmackssinn`, y=Percentage)) +
+  geom_bar(alpha=0.6, stat="identity",
+           color=blue.lmu, fill=blue.lmu) +
+  ylab("Anteil Antikörper-pos. [%]") +
+  #xlab("Verlust von\nGeruchs-/Geschmackssinn") +
+  ylim(0,22)
+fig3d
+ 
+top <- plot_grid(fig3a, labels="A")
+bottom <- plot_grid(fig3b, fig3c, fig3d,
+                    labels=c("B", "C", "D"), ncol=3)
+top
+bottom
+plot_grid(top, bottom, nrow=2)
+
+# plot_grid(fig3a, fig3b, fig3c, fig3d,
+#           labels=c("A", "B", "C", "D"),
+#           ncol=4, rel_widths = c(0.5,0.2,0.2,0.2))
+ggsave("DZ-Figure-3-vertical-limit20.pdf", width=10, height=8)
+ggsave("DZ-Figure-3-vertical-limit20.png", width=10, height=8)
+
+```
+
+
+### Figure 3 - vertical - limit default
+
+```{r, fig.width = 8, fig.height = 3, results = FALSE}
+
+
+fig3a <- d %>%
+  select(Agegroup, Roche_Result_new) %>%
+  rename(Alter = Agegroup) %>%
+  mutate(Alter = factor(Alter, levels=c("0-19", "20-34", "35-49", "50-64", "65-79", "80+"),
+                        labels=c("14-19", "20-34", "35-49", "50-64", "65-79", "80+"))) %>%
+  group_by(Alter, Roche_Result_new) %>%
+  summarise(num = n()) %>%
+  mutate(Prev.crude = num/sum(num)) %>%
+  ungroup() %>%
+  mutate(Prev.adj = ((Prev.crude + (spec - 1)) / (sens + spec - 1)),
+         Percentage = Prev.adj * 100) %>%
+  filter(Roche_Result_new %in% "Positive") %>%
+  ggplot(aes(x=Alter, y=Percentage)) +
+  geom_bar(alpha=0.6, stat="identity", 
+           color=blue.lmu, fill=blue.lmu) +
+  ylab("Anteil Antikörper-pos. [%]") +
+  ylim(0,22)
+fig3a
+
+
+fig3b <- d %>%
+  select(Sex, Roche_Result_new) %>%
+  mutate(Geschlecht = factor(Sex),
+         Geschlecht = case_when(
+           Geschlecht == "Female" ~ "Weiblich",
+           Geschlecht == "Male" ~ "Männlich")) %>%
+  group_by(Geschlecht, Roche_Result_new) %>%
+  summarise(num = n()) %>%
+  mutate(Prev.crude = num/sum(num)) %>%
+  ungroup() %>%
+  mutate(Prev.adj = ((Prev.crude + spec - 1) / (sens + spec - 1)),
+         Percentage = Prev.adj * 100) %>%
+    filter(Roche_Result_new %in% "Positive") %>%
+  ggplot(aes(x=Geschlecht, y=Percentage)) +
+  geom_bar(alpha=0.6, stat="identity",
+           color=blue.lmu, fill=blue.lmu) +
+  ylab("Anteil Antikörper-pos. [%]") +
+  ylim(0,22)
+fig3b
+
+# Respiratory allergies (not-sure category in the "no" category)
+fig3c <- d %>%
+  select(HealthStatus_Self_Allergies_Respiratory, Roche_Result_new) %>%
+  rename(Atemwegsallergien = HealthStatus_Self_Allergies_Respiratory) %>%
+  mutate(Atemwegsallergien = factor(Atemwegsallergien, levels=c("No", "Yes"),
+                            labels=c("Nein", "Ja"))) %>%
+  group_by(Atemwegsallergien, Roche_Result_new) %>%
+  summarise(num = n()) %>%
+  mutate(Prev.crude = num/sum(num)) %>%
+  ungroup() %>%
+  mutate(Prev.adj = ((Prev.crude + spec - 1) / (sens + spec - 1)),
+         Percentage = Prev.adj * 100) %>%
+  filter(Roche_Result_new %in% "Positive") %>%
+  filter(!is.na(Atemwegsallergien)) %>%
+  ggplot(aes(x=Atemwegsallergien, y=Percentage)) +
+  geom_bar(alpha=0.6, stat="identity", 
+           color=blue.lmu, fill=blue.lmu) +
+  ylab("Anteil Antikörper-pos. [%]") +
+  ylim(0,22)
+fig3c
+
+# Loss smell/taste (not-sure category in the "no" category)
+fig3d <- d %>%
+  select(Symptoms_past2w_SenseLoss.Smell.Taste., Roche_Result_new) %>%
+  rename(`Verlust von Geruchs-/Geschmackssinn` = Symptoms_past2w_SenseLoss.Smell.Taste.) %>%
+  mutate(`Verlust von Geruchs-/Geschmackssinn` = factor(`Verlust von Geruchs-/Geschmackssinn`,
+                                                levels=c("No", "Yes"),
+                                                labels=c("Nein", "Ja"))) %>%
+  group_by(`Verlust von Geruchs-/Geschmackssinn`, Roche_Result_new) %>%
+  summarise(num = n()) %>%
+  mutate(Prev.crude = num/sum(num)) %>%
+  ungroup() %>%
+  mutate(Prev.adj = ((Prev.crude + spec - 1) / (sens + spec - 1)),
+         Percentage = Prev.adj * 100) %>%
+  filter(Roche_Result_new %in% "Positive") %>%
+  filter(!is.na(`Verlust von Geruchs-/Geschmackssinn`)) %>%
+  ggplot(aes(x=`Verlust von Geruchs-/Geschmackssinn`, y=Percentage)) +
+  geom_bar(alpha=0.6, stat="identity",
+           color=blue.lmu, fill=blue.lmu) +
+  ylab("Anteil Antikörper-pos. [%]") +
+  #xlab("Verlust von\nGeruchs-/Geschmackssinn") +
+  ylim(0,22)
+fig3d
+ 
+top <- plot_grid(fig3a, labels="A")
+bottom <- plot_grid(fig3b, fig3c, fig3d,
+                    labels=c("B", "C", "D"), ncol=3)
+top
+bottom
+plot_grid(top, bottom, nrow=2)
+
+# plot_grid(fig3a, fig3b, fig3c, fig3d,
+#           labels=c("A", "B", "C", "D"),
+#           ncol=4, rel_widths = c(0.5,0.2,0.2,0.2))
+ggsave("DZ-Figure-3-vertical-limit-default.pdf", width=14, height=6)
+ggsave("DZ-Figure-3-vertical-limit-default.png", width=14, height=6)
+
+```
+
+### Figure 3 - together - facets
+
+```{r, fig.width = 8, fig.height = 3, results = FALSE}
+
+fig3h <- d %>%
+  select(Agegroup, Sex, 
+         HealthStatus_Self_Allergies_Respiratory,
+         Symptoms_past2w_SenseLoss.Smell.Taste., 
+         Roche_Result_new) %>%
+  gather(Variable, Value, -Roche_Result_new) %>%
+  group_by(Variable, Value, Roche_Result_new) %>%
+  summarise(num = n()) %>%
+  mutate(Prev.crude = num/sum(num)) %>%
+  ungroup() %>%
+  mutate(Prev.adj = ((Prev.crude + (spec - 1)) / (sens + spec - 1)),
+         Percentage = Prev.adj * 100) %>%
+  filter(Roche_Result_new %in% "Positive") %>%
+  filter(!is.na(Value)) %>%
+  ggplot(aes(x=Value, y=Percentage)) +
+  geom_bar(alpha=0.6, stat="identity", 
+           color=blue.lmu, fill=blue.lmu) +
+  ylab("Anteil Antikörper-pos. [%]") +
+  facet_wrap(~Variable, scales="free_y", ncol=1) +
+  coord_flip() +
+  xlab("")
+fig3h
+
+fig3v <- d %>%
+  select(Agegroup, Sex, 
+         HealthStatus_Self_Allergies_Respiratory,
+         Symptoms_past2w_SenseLoss.Smell.Taste., 
+         Roche_Result_new) %>%
+  gather(Variable, Value, -Roche_Result_new) %>%
+  group_by(Variable, Value, Roche_Result_new) %>%
+  summarise(num = n()) %>%
+  mutate(Prev.crude = num/sum(num)) %>%
+  ungroup() %>%
+  mutate(Prev.adj = ((Prev.crude + (spec - 1)) / (sens + spec - 1)),
+         Percentage = Prev.adj * 100) %>%
+  filter(Roche_Result_new %in% "Positive") %>%
+  filter(!is.na(Value)) %>%
+  ggplot(aes(x=Value, y=Percentage)) +
+  geom_bar(alpha=0.6, stat="identity", 
+           color=blue.lmu, fill=blue.lmu) +
+  ylab("Anteil Antikörper-pos. [%]") +
+  facet_wrap(~Variable, scales="free_x", ncol=4) +
+  xlab("")
+fig3v
+
+
+
+```
+
+
+### Figure 1 (to be completed by Yannik)
+
+```{r, fig.width = 8, fig.height = 3, results = FALSE}
+
+head(ind.koco.orig)
+str(ind.koco.orig)
+Sys.setlocale("LC_ALL", "en_US.UTF-8")
+Sys.setlocale("LC_TIME", "German")
+
+# 1B (Number of KoCo19 recruited people per week)
+fig1b <- ind.koco.orig %>%
+  filter(inclusion_criteria %in% "Included") %>%
+  as_tibble() %>%
+  select(ind_id, VisitDate_Baseline) %>%
+  rename(Date = VisitDate_Baseline) %>%
+  mutate(Date = as.Date(Date)) %>%
+  mutate(Week = strftime(Date, format="%V")) %>%
+  group_by(Week) %>%
+  #mutate(Label = min(Date)) %>%
+  # ungroup() %>%
+  # group_by(Label) %>%
+  summarize(num = n()) %>%
+  # mutate(Label.german = case_when(
+  #   Label == "2020-04-06" ~ "6-Apr",
+  #   Label == "2020-04-13" ~ "13-Apr",
+  #   Label == "2020-04-20" ~ "20-Apr",
+  #   Label == "2020-04-27" ~ "27-Apr",
+  #   Label == "2020-05-04" ~ "4-Mai",
+  #   Label == "2020-05-11" ~ "11-Mai",
+  #   Label == "2020-05-18" ~ "18-Mai",
+  #   Label == "2020-05-25" ~ "25-Mai",
+  #   Label == "2020-06-01" ~ "1-Jun",
+  #   Label == "2020-06-08" ~ "8-Jun")) %>%
+  # mutate(Label.german = fct_inorder(Label.german)) %>%
+   ggplot(aes(x=Week, y=num, group=1)) +
+  geom_point(color=style$pal4[2], size=2.5) +
+  geom_path(color=style$pal4[2]) +
+  xlab("") +
+  ylab("Anzahl der pro Woche in KoCo19 rekrutierten Personen")
+  
+fig1b
+
+# 1D (Percentage of positive antibodies (in Koco, per week))
+fig1d <- ind.koco.orig %>%
+  filter(inclusion_criteria %in% "Included") %>%
+  as_tibble() %>%
+  select(ind_id, VisitDate_Baseline) %>%
+  rename(Date = VisitDate_Baseline) %>%
+  mutate(Date = as.Date(Date)) %>%
+  mutate(Week = strftime(Date, format="%V")) %>%
+  group_by(Week) %>%
+  mutate(Label = min(Date)) %>%
+  ungroup() %>%
+  left_join(select(lab.bin, ind_id, Roche.bin)) %>%
+  group_by(Label, Roche.bin) #%>%
+  summarize(num = n()) %>%
+  ungroup() %>%
+  mutate(Percentage = )
+  mutate(cumnum = cumsum(num))
+  mutate(Label.german = case_when(
+    Label == "2020-04-06" ~ "6-Apr",
+    Label == "2020-04-13" ~ "13-Apr",
+    Label == "2020-04-20" ~ "20-Apr",
+    Label == "2020-04-27" ~ "27-Apr",
+    Label == "2020-05-04" ~ "4-Mai",
+    Label == "2020-05-11" ~ "11-Mai",
+    Label == "2020-05-18" ~ "18-Mai",
+    Label == "2020-05-25" ~ "25-Mai",
+    Label == "2020-06-01" ~ "1-Jun",
+    Label == "2020-06-08" ~ "8-Jun")) %>%
+  mutate(Label.german = fct_inorder(Label.german)) %>%
+  ggplot(aes(x=Label.german, y=num, group=1)) +
+  geom_point(color=style$pal4[2], size=2.5) +
+  geom_path(color=style$pal4[2]) +
+  xlab("") +
+  ylab("Anzahl XXX pro Woche in KoCo19 XXX Personen [%]")
+  
+fig1d
+
+
+# 1E (Estimate of the overall prevalence of cases)
+
+prevalence <- data.frame(Test = c("PCR-positiv", "Antikörper-positiv"),
+                         Value = c(0.4, 1.6))
+fig1e <- prevalence %>%
+  mutate(Test = fct_inorder(Test)) %>%
+  ggplot(aes(x=Test, y=Value, color=Test, fill=Test)) +
+  geom_bar(alpha=0.6, stat="identity") +
+  xlab("") + ylab("Schätzung des Prozentsatzes [%]") +
+  theme(legend.position="none") +
+  scale_color_manual(values=c(style$pal4[1], style$pal4[2])) +
+  scale_fill_manual(values=c(style$pal4[1], style$pal4[2]))
+fig1e  
+
+```

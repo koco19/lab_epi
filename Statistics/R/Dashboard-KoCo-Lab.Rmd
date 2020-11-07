@@ -1,0 +1,369 @@
+---
+title: "KoCo19 Lab"
+author: "Mercè Garí"
+date: '2020-08-24'
+output:
+  flexdashboard::flex_dashboard:
+    orientation: rows
+---
+
+```{r setup, include=FALSE}
+#rmarkdown::render("dashboard.Rmd") # to run it
+
+library(flexdashboard)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(ggthemes)
+library(GGally)
+
+theme_set(theme_tufte(base_family = "Source Sans Pro",
+                      base_size = 10))
+invisible(Sys.setlocale(category = "LC_ALL", locale = "en_US"))
+
+lab.orig <- read.csv("KoCo19_BaselineLAB.csv")
+lab.orig <- lab.orig[,-1]
+ind.orig <- read.csv("KoCo19_indcharacteristics.csv")
+ind.orig <- ind.orig[,-1]
+hh.orig <- read.csv("KoCo19_hhcharacteristics.csv")
+hh.orig <- hh.orig[,-1]
+
+lab <- lab.orig %>%
+  rename(IgA = IgA_quant, IgG = IgG_quant,
+         Roche = R_quant, NT = NT_quant, CPass = CPass_quant,
+         NT.bin = NT_Result, CPass.bin = CPass_Result) %>%
+  mutate(IgA.bin = ifelse(IgA < 1.1, "Negative", "Positive"),
+         IgG.bin = ifelse(IgG < 1.1, "Negative", "Positive"),
+         Roche.bin = ifelse(Roche < 1, "Negative", "Positive"),
+         IgA.bin = as.factor(IgA.bin),
+         IgG.bin = as.factor(IgG.bin),
+         Roche.bin = as.factor(Roche.bin),
+         NT = factor(as.character(NT), 
+                     levels = c("<10", "10", "20", "40", ">80")))
+
+```
+
+
+Main tests
+==================================================================
+
+Row
+-----------------------------------------------------------------------
+
+### Violinplots
+
+```{r, fig.width = 8, fig.height = 3, results = FALSE}
+lab %>% 
+  tidyr::gather(Antibody, Concentration, c(IgA, IgG, Roche)) %>%
+  mutate(Test = ifelse(Antibody == "Roche", "Roche", "Euroimmun"),
+         Limit = ifelse(Antibody == "Roche", 1, 1.1)) %>%
+  ggplot(aes(y = Concentration, x = Antibody)) +
+  geom_violin(alpha = 0.20) +
+  scale_y_log10() +
+  ylab("Concentration") +
+  facet_wrap(~Test, scales="free") +
+  xlab("") + 
+  geom_hline(aes(yintercept = Limit), col = "grey30", lty = 2) + 
+  theme_bw()
+```
+
+
+### Density plots
+
+```{r, fig.width = 8, fig.height = 3, results = FALSE}
+lab %>% 
+  tidyr::gather(Antibody, Concentration, c(IgA, IgG, Roche)) %>%
+  mutate(Test = ifelse(Antibody == "Roche", "Roche", "Euroimmun"),
+         Limit = ifelse(Antibody == "Roche", 1, 1.1)) %>%
+  ggplot(aes(x = Concentration, color = Antibody, fill = Antibody)) +
+  geom_density(alpha = 0.20) +
+  scale_x_log10() +
+  #facet_wrap(~Test, scales="free") +
+  xlab("Concentration") + ylab("Density") +
+  theme_bw()
+```
+
+Row
+-----------------------------------------------------------------------
+
+### Scatterplot Euroimmun IgA and IgG
+
+```{r, fig.width = 8, fig.height = 3, results = FALSE}
+lab %>%
+  mutate(Status = ifelse(IgG.bin == "Positive" & IgA.bin == "Positive", "Both positives", ifelse(IgG.bin == "Negative" & IgA.bin == "Negative", "Both negatives", "Other"))) %>%
+  ggplot(aes(x=IgG, y=IgA, color = Status)) +
+  geom_point(alpha = 0.5) +
+  scale_x_log10() +
+  scale_y_log10() +
+  theme_bw() +
+  geom_hline(yintercept = 1.1, col ="grey30", lty = 2) +
+  geom_vline(xintercept = 1.1, col ="grey30", lty = 2)
+```
+
+
+### Scatterplot Euroimmun (IgG) and Roche
+
+```{r, fig.width = 8, fig.height = 3, results = FALSE}
+lab %>%
+  mutate(Status = ifelse(IgG.bin == "Positive" & Roche.bin == "Positive", "Both positives", ifelse(IgG.bin == "Negative" & Roche.bin == "Negative", "Both negatives", "Other"))) %>%
+  ggplot(aes(x=IgG, y=Roche, color = Status)) +
+  geom_point(alpha = 0.5) +
+  scale_x_log10() +
+  scale_y_log10() +
+  theme_bw() +
+  geom_hline(yintercept = 1, col ="grey30", lty = 2) +
+  geom_vline(xintercept = 1.1, col ="grey30", lty = 2)
+```
+
+
+Confirmatory tests
+==================================================================
+
+Row
+-----------------------------------------------------------------------
+
+### CPass
+```{r, fig.width = 8, fig.height = 3, results = FALSE}
+lab %>%
+  ggplot(aes(x=CPass), fill="grey") +
+  geom_density(fill="grey") +
+  xlab("CPass concentration") + ylab("Density") +
+  theme_bw()
+```
+
+### Neutralization
+```{r, fig.width = 8, fig.height = 3, results = FALSE}
+lab %>%
+  filter(!is.na(NT)) %>%
+  ggplot(aes(x=NT)) +
+  geom_bar(fill="grey") +
+  xlab("NT test value") + ylab("Number of tests") +
+  theme_bw()
+
+```
+
+Row
+-----------------------------------------------------------------------
+
+### Array
+
+```{r, fig.width = 8, fig.height = 3, results = FALSE}
+lab %>%
+  tidyr::gather(Array, Concentration, 
+                c(VC_S1_IgA, VC_S2_IgA, VC_N_IgA,
+                  VC_S1_IgM, VC_S2_IgM, VC_N_IgM,
+                  VC_S1_IgG, VC_S2_IgG, VC_N_IgG)) %>%
+  ggplot(aes(x=Array, y=Concentration)) +
+  geom_violin() +
+  geom_point(alpha = 0.5) +
+  theme_bw() +
+  scale_y_log10() +
+  geom_hline(yintercept = 70, color = "red", lty = 2) +
+    geom_hline(yintercept = 100, color = "blue", lty = 2)
+```
+
+
+Combination (i)
+==================================================================
+
+Row
+-----------------------------------------------------------------------
+
+### Boxplot Euroimmun-IgG/Roche vs. Neutralization
+
+```{r, fig.width = 8, fig.height = 3, results = FALSE}
+lab %>%
+  filter(IgG.bin %in% "Positive" | Roche.bin %in% "Positive") %>%
+  tidyr::gather(Antibody, Concentration, c(IgG, Roche)) %>%
+  mutate(Limits = ifelse(Antibody == "IgG", 1.1, 1)) %>%
+  ggplot(aes(y=Concentration, x = CPass.bin)) +
+  geom_boxplot(alpha = 0.4) +
+  scale_y_log10() +
+  geom_hline(aes(yintercept = Limits), color ="grey", lty =2) +
+  facet_wrap(~Antibody) +
+  xlab("CPass result") +
+  theme_bw() 
+```
+
+### Boxplot Euroimmun-IgG/Roche vs. CPass
+
+```{r, fig.width = 8, fig.height = 3, results = FALSE}
+lab %>%
+  filter(IgG.bin %in% "Positive" | Roche.bin %in% "Positive") %>%
+  tidyr::gather(Antibody, Concentration, c(IgG, Roche)) %>%
+  mutate(Limits = ifelse(Antibody == "IgG", 1.1, 1)) %>%
+  ggplot(aes(y=Concentration, x = NT.bin)) +
+  geom_boxplot(alpha = 0.4) +
+  scale_y_log10() +
+  geom_hline(aes(yintercept = Limits), color ="grey", lty =2) +
+  facet_wrap(~Antibody) +
+  xlab("NT result") +
+  theme_bw() 
+```
+
+
+Row
+-----------------------------------------------------------------------
+
+### Spaguetti plot IgG and Roche pairs
+
+```{r, fig.width = 6, fig.height = 3, results = FALSE}
+lab %>%
+  filter(IgG.bin %in% "Positive" | Roche.bin %in% "Positive") %>%
+  mutate(Result = ifelse(IgG.bin == "Positive" & Roche.bin == "Positive", "Both positives", "Other")) %>%
+  tidyr::gather(Antibody, Concentration, c(IgG, Roche)) %>%
+  ggplot(aes(y=Concentration, x=Antibody, group = ind_id,
+             color = Result)) +
+  geom_point(alpha = 0.4) +
+  geom_line(alpha = 0.1) +
+  xlab("") +
+  geom_hline(yintercept = 1, lty=2, color="grey") +
+  geom_hline(yintercept = 1.1, lty=2, color="grey") +
+  scale_y_log10() +
+  theme_bw() 
+```
+
+
+### Spaguetti plot IgG and Roche pairs with CPass
+
+```{r, fig.width = 6, fig.height = 3, results = FALSE}
+lab %>%
+  filter(IgG.bin %in% "Positive" | Roche.bin %in% "Positive") %>%
+  tidyr::gather(Antibody, Concentration, c(IgG, Roche)) %>%
+  ggplot(aes(y=Concentration, x=Antibody, group = ind_id,
+             color = CPass.bin)) +
+  geom_point(alpha = 0.4) +
+  geom_line(alpha = 0.1) +
+  xlab("") +
+  geom_hline(yintercept = 1, lty=2, color="grey") +
+  geom_hline(yintercept = 1.1, lty=2, color="grey") +
+  scale_y_log10() +
+  theme_bw() 
+```
+
+
+### Spaguetti plot IgG and Roche pairs with NT
+
+```{r, fig.width = 6, fig.height = 3, results = FALSE}
+lab %>%
+  filter(IgG.bin %in% "Positive" | Roche.bin %in% "Positive") %>%
+  tidyr::gather(Antibody, Concentration, c(IgG, Roche)) %>%
+  ggplot(aes(y=Concentration, x=Antibody, group = ind_id,
+             color = NT.bin)) +
+  geom_point(alpha = 0.4) +
+  geom_line(alpha = 0.1) +
+  xlab("") +
+  geom_hline(yintercept = 1, lty=2, color="grey") +
+  geom_hline(yintercept = 1.1, lty=2, color="grey") +
+  scale_y_log10() +
+  theme_bw() 
+```
+
+
+Combination (ii)
+==================================================================
+
+Row
+-----------------------------------------------------------------------
+
+### Scatterplot Roche/IgG vs CPass/NT results
+
+```{r, fig.width = 8, fig.height = 3, results = FALSE}
+lab %>%
+  #filter(IgG.bin %in% "Positive" | Roche.bin %in% "Positive") %>%
+  mutate(Result = ifelse(IgG.bin == "Positive" & Roche.bin == "Positive", "Both positives", "Other")) %>%
+  tidyr::gather(Test, Result, c(CPass.bin, NT.bin)) %>%
+  ggplot(aes(y=IgG, x = Roche, color = Result)) +
+  geom_point() +
+  scale_y_log10() + scale_x_log10() +
+  facet_grid(~Test) +
+  geom_vline(xintercept = 1, color ="grey", lty=2) +
+  geom_hline(yintercept = 1.1, color="grey", lty=2) +
+  theme_bw() 
+```
+
+
+Combination (iii)
+==================================================================
+
+Row
+-----------------------------------------------------------------------
+
+
+### Scatterplot Roche/IgG vs Array (threshold 70)
+
+```{r, fig.width = 8, fig.height = 3, results = FALSE}
+# For array, threshold of 70
+lab %>%
+  tidyr::gather(Test, Result, 
+                c(CPass.bin, NT.bin, 
+                  VC_S1_IgA_Result_c70, VC_S2_IgA_Result_c70, 
+                  VC_N_IgA_Result_c70, VC_S1_IgM_Result_c70, 
+                  VC_S2_IgM_Result_c70, VC_N_IgM_Result_c70, 
+                  VC_S1_IgG_Result_c70, VC_S2_IgG_Result_c70, 
+                  VC_N_IgG_Result_c70)) %>%
+  ggplot(aes(y=IgG, x = Roche, color = Result)) +
+  geom_point(alpha = 0.5) +
+  scale_y_log10() + scale_x_log10() +
+  facet_wrap(~Test) +
+  geom_vline(xintercept = 1, color ="grey", lty=2) +
+  geom_hline(yintercept = 1.1, color="grey", lty=2) +
+  theme_bw() 
+```
+
+
+Combination (iv)
+==================================================================
+
+Row
+-----------------------------------------------------------------------
+
+
+### Pairs (to be finished)
+
+```{r, fig.width = 8, fig.height = 3, results = FALSE}
+lab %>%
+  filter(!is.na(NT)) %>%
+  select(IgA, IgG, Roche, CPass, NT) %>%
+  ggpairs() +
+  theme_bw()
+
+```
+
+
+PCR results
+==================================================================
+
+Row
+-----------------------------------------------------------------------
+
+### Previous PCR test and main tests
+
+```{r, fig.width = 8, fig.height = 3, results = FALSE}
+# How many of the initially sero-positive individuals in the baseline-study were previously tested by pharyngeal swab and nucleic acid amplification (PCR) (positively or negatively) and/or had symptoms suggestive for COVID-19 (yes or no)?
+
+lab %>%
+  pivot_longer(c("IgG", "IgA", "Roche"), 
+               names_to = "Antibody", 
+               values_to = "Concentration") %>%
+  left_join(select(ind.orig, ind_id, Testing_positive)) %>%
+  mutate(`Previous PCR Test` = Testing_positive) %>%
+  ggplot(aes(x=`Previous PCR Test`, y=Concentration)) +
+  geom_boxplot(alpha=0.5) +
+  scale_x_discrete(labels = c("Negative", "Result not\navailable yet", "Positive")) +
+  facet_wrap(~Antibody) +
+  ylab("Antibody concentration") +
+  geom_hline(yintercept = 1.1, col = "grey30", lty = 2) + 
+  theme_bw() +
+  scale_y_log10()
+
+
+```
+
+
+
+About
+==================================================================
+
+These plots are only based on KoCo19 data.
+

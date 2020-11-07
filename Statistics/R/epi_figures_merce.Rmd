@@ -1,0 +1,305 @@
+---
+title: "Epi Paper Figures"
+author: "Mercè Garí"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(ggplot2)
+
+here_r = function (...) here::here("Statistics", "R", ...)
+here_koco = function (...) here::here("KoCo19_Datasets", ...)
+here_epi_out = function (...) here::here("Epi_out", ...)
+
+# Setup
+source(here_r("setup.R"))
+
+# Install packages
+
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(ggthemes)
+library(GGally)
+library(colorspace)
+library(cowplot)
+library(readxl)
+library(ggpmisc)
+library(forcats)
+```
+
+```{r}
+
+# Load data
+
+#------------------------- Lab from Koco
+lab.koco.orig <- read.csv(here_koco("Analysis Data Sets", "ind_lab_baseline_new.csv"),
+                          stringsAsFactors=F)
+lab.koco.orig <- lab.koco.orig[,-1]
+
+#------------------------- Ind from Koco
+ind.koco.orig <- read.csv(here_koco("Analysis Data Sets", "ind_characteristics_new.csv"))
+ind.koco.orig <- ind.koco.orig[,-1]
+
+#------------------------- Baseline from Koco
+baseline.koco.orig <- read.csv(here_koco("Analysis Data Sets", "Koco_baseline.csv"))
+baseline.koco.orig <- baseline.koco.orig[,-1]
+
+
+lab <- lab.koco.orig %>%
+  as_tibble() %>%
+  rename(IgA = IgA_quant, IgG = IgG_quant,
+         Roche = R_quant, cPass = CPass_quant,
+         NT = NT_quant) %>%
+  select(ind_id, IgA, IgG, Roche, cPass, NT, 
+         VC_S1_IgA, VC_S2_IgA, VC_N_IgA,
+         VC_S1_IgG, VC_S2_IgG, VC_N_IgG,
+         VC_S1_IgM, VC_S2_IgM, VC_N_IgM,
+         LineBlot_RBD_SARS_2, LineBlot_NP_SARS_2,
+         LineBlot_S1_SARS_2,
+         Schnupfen_NP_229E, Schnupfen_NP_HKU1,
+         Schnupfen_NP_OC43, Schnupfen_NP_NL63, inclusion_criteria) %>%
+  filter(inclusion_criteria %in% "Included") %>%
+  select(-inclusion_criteria)
+
+# Convert NT into numeric
+lab <- lab %>%
+  mutate(NT = ifelse(NT == "<10", "5",
+                     ifelse(NT == ">80", "80", NT)))
+
+# Convert arrays into numeric
+lab.array <- lab %>%
+  select(ind_id,
+         VC_S1_IgA, VC_S2_IgA, VC_N_IgA,
+         VC_S1_IgG, VC_S2_IgG, VC_N_IgG,
+         VC_S1_IgM, VC_S2_IgM, VC_N_IgM) %>%
+  gather(array, value, -ind_id) %>%
+    mutate(value = ifelse(value == "<10", "5", value),
+           value = as.numeric(value)) %>%
+  spread(array, value)
+
+lab <- lab %>%
+  select(-c(VC_S1_IgA, VC_S2_IgA, VC_N_IgA,
+         VC_S1_IgG, VC_S2_IgG, VC_N_IgG,
+         VC_S1_IgM, VC_S2_IgM, VC_N_IgM)) %>%
+  left_join(lab.array)
+
+# Convert lineblots and common colds into numeric
+lab.lineblot <- lab %>%
+  select(ind_id,
+         LineBlot_NP_SARS_2, LineBlot_RBD_SARS_2,
+         LineBlot_S1_SARS_2, 
+         Schnupfen_NP_229E, Schnupfen_NP_NL63, 
+         Schnupfen_NP_OC43, Schnupfen_NP_HKU1) %>%
+  gather(lineblot, value, -ind_id) %>%
+  mutate(value = ifelse(value == "not_reactive", "0.5", value),
+         value = as.numeric(value)) %>%
+  spread(lineblot, value)
+
+
+lab <- lab %>%
+  select(-c(LineBlot_NP_SARS_2, LineBlot_RBD_SARS_2,
+         LineBlot_S1_SARS_2,
+         Schnupfen_NP_229E, Schnupfen_NP_NL63, 
+         Schnupfen_NP_OC43, Schnupfen_NP_HKU1)) %>%
+  left_join(lab.lineblot)
+
+# Lab long
+lab.long <- lab %>%
+  gather(Test, value, -ind_id) %>%
+  mutate(value = as.numeric(value))
+
+
+#################################################
+
+# Thresholds
+thr.man <- as.data.frame(cutoff$old) %>%
+  gather(Test, Manufacturer)
+thr.cal <- as.data.frame(cutoff$new) %>%
+  gather(Test, Optimized)
+thresholds <- left_join(thr.man, thr.cal) %>%
+  mutate(Test = ifelse(Test == "Eur_IgA", "IgA",
+                       ifelse(Test == "Eur_IgG", "IgG", Test))) %>%
+  as_tibble()
+
+thresholds <- as.data.frame(thresholds)
+
+# Add manually the Common cold thresholds (1 for all)
+thresholds.additional <- data.frame(Test = c("Schnupfen_NP_229E",
+                                             "Schnupfen_NP_NL63",
+                                             "Schnupfen_NP_OC43",
+                                             "Schnupfen_NP_HKU1"),
+                                    Manufacturer = rep(1, 4),
+                                    Optimized = rep(1, 4))
+                                      
+thresholds <- rbind(thresholds, thresholds.additional)
+thresholds$Manufacturer[thresholds$Test == "NT"] <- 10
+str(thresholds)
+
+###################################
+
+# Lab long with binary results
+lab.long.bin <- lab.long %>%
+    left_join(thresholds) %>%
+  mutate(Result = ifelse(value >= Optimized, "Positive",
+                         ifelse(value < Optimized, "Negative", value))) %>%
+  select(-value, -Manufacturer, -Optimized)
+
+lab.bin <- lab.long.bin %>%
+  mutate(Test = paste0(Test, ".bin")) %>%
+  spread(Test, Result)
+  
+####################################
+
+# Add adequate test names
+Test.names <- data.frame(Test = unique(lab.long$Test),
+                         name = c("EI-S1-IgA", "EI-S1-IgG", "Ro-N-Ig", 
+                                  "GS-cPass", "NT", 
+                                  "VC N IgA", "VC N IgG", "VC N IgM",
+                                  "VC S1 IgA", "VC S1 IgG", "VC S1 IgM",
+                                  "VC S2 IgA", "VC S2 IgG", "VC S2 IgM",
+                                  "MG-N", "MG-RBD", "MG-S1", 
+                                  "NP-229E", "NP-HKU1", 
+                                  "NP NL63", "NP-OC43"))
+
+Test.names
+
+###################################
+# PCR information from individual data
+
+pcr <- ind.koco.orig %>%
+  select(ind_id, Testing_positive, inclusion_criteria) %>%
+  filter(inclusion_criteria %in% "Included") %>%
+  select(-inclusion_criteria) %>%
+  mutate(Testing_positive = case_when(
+    Testing_positive == "Result not available" ~ "Result not available",
+    Testing_positive == "No positive" ~ "Negative",
+    Testing_positive == "Yes-1 positive atleast" ~ "Positive"),
+    Testing_positive = as.factor(Testing_positive))
+
+
+```
+
+
+
+### Figure S1
+
+```{r, fig.width = 8, fig.height = 3, results = FALSE}
+
+thresholds.now <- thresholds %>%
+  gather(Threshold, value, -Test) %>%
+  spread(Test, value) 
+
+lab %>%
+  select(ind_id, IgG, Roche) %>%
+  left_join(select(lab.bin, ind_id, cPass.bin, Roche.bin, NT.bin)) %>%
+  left_join(pcr) %>%
+  rename(`A) Classifier` = Roche.bin, `B) GS-cPass` = cPass.bin, 
+         `C) NT` = NT.bin, `D) PCR` = Testing_positive) %>%
+  gather(Test, Result, -c(ind_id, IgG, Roche)) %>%
+  mutate(Result = ifelse(Result == "Result not available" | 
+                           is.na(Result), "Not performed", Result)) %>%
+  ggplot(aes(x=Roche, y=IgG, color=Result)) +
+  geom_point(data = .%>% filter(Result %in% "Not performed"), 
+             alpha=0.3, size=1) +
+  geom_point(data = .%>% filter(Result %in% "Negative"), 
+             alpha=0.7, size=1) +
+  geom_point(data = .%>% filter(Result %in% "Positive"), 
+             alpha=0.7, size=1) +
+  facet_wrap(~Test) +
+  scale_y_log10() +
+  scale_x_log10() +
+  scale_colour_manual(values=style$pal3[c(2,1,3)]) +
+  geom_hline(data=filter(thresholds.now, Threshold=="Manufacturer"),
+             aes(yintercept=IgG, linetype=style$thr_lb_old),
+              color=style$thr_lc_old)  +
+  geom_hline(data=filter(thresholds.now, Threshold=="Optimized"),
+             aes(yintercept=IgG, linetype=style$thr_lb_new),
+              color=style$thr_lc_new) +
+  scale_linetype_manual(name="Threshold",
+                        values=c(style$thr_lt_old,style$thr_lt_new)) +
+  geom_vline(data=filter(thresholds.now, Threshold=="Manufacturer"),
+             aes(xintercept=Roche, linetype=style$thr_lb_old),
+              color=style$thr_lc_old, show.legend=FALSE)  +
+  geom_vline(data=filter(thresholds.now, Threshold=="Optimized"),
+             aes(xintercept=Roche, linetype=style$thr_lb_new),
+              color=style$thr_lc_new, show.legend=FALSE) +
+  xlab("Ro-N-Ig") + ylab("EI-S1-IgG") 
+  
+ggsave("Epi-Figure-S1-201029.png", width=8, height=5)
+ggsave("Epi-Figure-S1-201029.pdf", width=8, height=5)
+
+
+
+# Epi overall test results in binary
+lab.long.bin %>%
+  left_join(Test.names) %>%
+  left_join(select(lab, ind_id, Roche, IgG)) %>%
+  mutate(Result = ifelse(is.na(Result), "Not performed", Result)) %>%
+  mutate(Test = fct_inorder(Test),
+         name = fct_inorder(name)) %>%
+  filter(Test %in% c("IgA", "cPass", "NT", 
+                     "VC_N_IgA", "VC_N_IgG", "VC_N_IgM",
+                     "VC_S1_IgA", "VC_S1_IgG", "VC_S1_IgM",
+                     "VC_S2_IgA", "VC_S2_IgG", "VC_S2_IgM",
+                     "LineBlot_NP_SARS_2", "LineBlot_RBD_SARS_2",
+                     "LineBlot_S1_SARS_2")) %>%
+  droplevels() %>%
+  ggplot(aes(x=Roche, y=IgG, color=Result)) +
+  geom_point(data = .%>% filter(Result %in% "Not performed"), 
+             alpha=0.4, size=1) +
+  geom_point(data = .%>% filter(Result %in% "Negative"), 
+             alpha=0.5, size=1) +
+  geom_point(data = .%>% filter(Result %in% "Positive"), 
+             alpha=0.5, size=1) +
+  facet_wrap(~name, ncol=5) +
+  scale_y_log10() +
+  scale_x_log10() +
+  scale_colour_manual(values=style$pal3[c(2,1,3)]) +
+  geom_hline(data=filter(thresholds.now, Threshold=="Manufacturer"),
+             aes(yintercept=IgG, linetype=style$thr_lb_old),
+              color=style$thr_lc_old)  +
+  geom_hline(data=filter(thresholds.now, Threshold=="Optimized"),
+             aes(yintercept=IgG, linetype=style$thr_lb_new),
+              color=style$thr_lc_new) +
+  scale_linetype_manual(name="Threshold",
+                        values=c(style$thr_lt_old,style$thr_lt_new)) +
+  geom_vline(data=filter(thresholds.now, Threshold=="Manufacturer"),
+             aes(xintercept=Roche, linetype=style$thr_lb_old),
+              color=style$thr_lc_old, show.legend=FALSE)  +
+  geom_vline(data=filter(thresholds.now, Threshold=="Optimized"),
+             aes(xintercept=Roche, linetype=style$thr_lb_new),
+              color=style$thr_lc_new, show.legend=FALSE) +
+  xlab("Ro-N-Ig") + ylab("EI-S1-IgG") 
+  
+ggsave("Epi-Figure-S2-201029.png", width=10, height=5)
+ggsave("Epi-Figure-S2-201029.pdf", width=10, height=5)
+
+# Epi overall test results Roche vs the other tests
+lab %>%
+  gather(Test, value, -ind_id, -Roche) %>%
+  left_join(Test.names) %>%
+  filter(Test %in% c("IgA", "IgG", "cPass", "NT",
+                     "VC_N_IgA", "VC_N_IgG", "VC_N_IgM",
+                     "VC_S1_IgA", "VC_S1_IgG", "VC_S1_IgM",
+                     "VC_S2_IgA", "VC_S2_IgG", "VC_S2_IgM",
+                     "LineBlot_NP_SARS_2", "LineBlot_RBD_SARS_2",
+                     "LineBlot_S1_SARS_2")) %>%
+  mutate(value = as.numeric(value)) %>%
+  droplevels() %>%
+  ggplot(aes(x=Roche, y=value)) +
+  geom_point(alpha=0.5) +
+  scale_y_log10(breaks=c(0.1, 1, 5, 10, 20, 40, 80), 
+                labels=c("<0.1", "<1", "<10", "10", "20", "40", ">80")) + 
+  scale_x_log10() +
+  facet_wrap(~name, scales="free") +
+  ylab("Test value") + xlab("Ro-N-Ig") 
+
+  
+
+```

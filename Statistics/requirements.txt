@@ -1,0 +1,74 @@
+dplyr
+tidyr
+here
+magrittr
+ggplot2
+cowplot
+ggcorrplot
+ggpubr
+stringr
+FSA
+Hmisc
+GGally
+
+# for maps
+ggmap
+rgdal
+spdep
+sf
+sp
+colorspace
+geojson
+maps
+geosphere
+
+# Permutations
+pryr
+
+# Epi Summary
+rmarkdown
+readxl
+summarytools
+formattable
+zoo
+reshape2
+plyr
+dplyr
+lubridate
+ggpubr
+arsenal
+stringi
+stringr
+tidyr
+foreign
+stats4
+cowplot 
+ggpmisc
+pscl
+hurdlr
+PupillometryR
+# GLMM/GLM Models and output
+lme4 
+glmmTMB
+bbmle
+countreg
+broom.mixed
+emmeans
+sjPlot 
+sjmisc 
+effects
+sjstats 
+tidyquant
+binom
+geepack
+gee
+BAS
+BMS
+# Merge graphs
+patchwork
+svglite
+# Multiple Imputation and missing values
+visdat
+JointAI
+
+

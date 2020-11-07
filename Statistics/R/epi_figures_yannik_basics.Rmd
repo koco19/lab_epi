@@ -1,0 +1,99 @@
+---
+title: "Epi Paper Basic Statistics"
+author: "Yannik Schälte"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+Compilation date: `r format(Sys.time(), '%d.%m.%Y')`
+
+```{r}
+library(ggplot2)
+
+here_r = function (...) here::here("Statistics", "R", ...)
+here_koco = function (...) here::here("KoCo19_Datasets", ...)
+here_out = function (...) here::here(
+  "Epi_out", "epi_figures_yannik_basics", ...)
+
+dir.create(here_out(), showWarnings = FALSE)
+
+# Setup
+source(here_r("setup.R"))
+
+###############################################################################
+# Prepare date
+
+# read pre-defined data set
+data_koco = read.csv(here_koco("Koco_baseline.csv"), stringsAsFactors = F)
+if (any(data_koco$IgA_quant == 0 | data_koco$IgG_quant == 0 |
+        data_koco$R_quant == 0, na.rm=T)) {
+  stop("Zeros should be NAs.")
+}
+
+# location data
+data_building = read.csv(
+  here_koco("Geocodes", "KoCo19_Haushalte4Modeler_20200909.csv"))
+for (address_id in unique(data_building$address_id)) {
+  data_building[data_building$address_id==address_id,"HouseholdsPerAddress"] =
+    sum(data_building$address_id==address_id, na.rm=T)
+}
+```
+
+## Inhabitants per household
+
+```{r, fig.width=3, fig.height=3}
+data = data_koco[!duplicated(data_koco$hh_id),]
+unique(data$HouseholdSize)
+plt_inh_per_hh = ggplot(data, aes(x=HouseholdSize)) +
+  geom_bar() + scale_x_continuous(breaks=1:9) +
+  labs(title="Inhabitants per household",
+       y="Number of households", x="Household size")
+plt_inh_per_hh
+ggsave(here_out("inh_per_hh.png"), width=3, height=3)
+```
+
+## Households per building
+
+```{r, fig.width=3, fig.height=3}
+
+data = data_building[!duplicated(data_building$address_id),]
+
+unique(data$AddressSize)
+plt_hh_per_bdg = ggplot(data, aes(x=HouseholdsPerAddress)) +
+  geom_bar() + scale_x_continuous(breaks=1:9) +
+  labs(title="Households per building",
+       y="Number of buildings", x="Number of households in same building")
+plt_hh_per_bdg
+ggsave(here_out("hh_per_bdg.png"), width=3, height=3)
+```
+
+## Inhabitants per building
+
+```{r, fig.width=3, fig.height=3}
+data1 = data_koco[c("ind_id", "hh_id", "HouseholdSize")]
+data2 = data_building[c("hht_ID", "address_id")]
+colnames(data2)[colnames(data2)=="hht_ID"] = "hh_id"
+data = merge(data1, data2, by = "hh_id")
+
+for (address_id in unique(data$address_id)) {
+  data[data$address_id==address_id,"InhabitantsPerAddress"] =
+    sum(data$address_id==address_id, na.rm=T)
+}
+
+data = data[!duplicated(data$hh_id),]
+
+unique(data$InhabitantsPerAddress)
+plt_inh_per_bdg = ggplot(data, aes(x=InhabitantsPerAddress)) +
+  geom_bar() + scale_x_continuous(breaks=1:15) +
+  labs(title="Inhabitants per building", y="Number of buildings",
+       x="Number of inhabitants in same building")
+plt_inh_per_bdg
+ggsave(here_out("inh_per_bdg.png"), width=3, height=3)
+```
+
+```{r, fig.width=9, fig.height=3}
+ggpubr::ggarrange(plt_inh_per_hh, plt_hh_per_bdg, plt_inh_per_bdg, ncol = 3)
+ggsave(here_out("inh_hh_bdg.png"), width=9, height=3)
+```

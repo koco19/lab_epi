@@ -1,0 +1,1727 @@
+---
+title: "Lab Paper 1st part"
+author: "Yannik Schälte"
+output:
+  pdf_document:
+    toc: true
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+Compilation date: `r format(Sys.time(), '%d.%m.%Y')`
+
+The figures used in the lab manuscript are generated in the last section of
+the notebook, the previous parts creating subplots and detailed analyses.
+
+# Prepare
+
+```{r}
+here_r = function (...) here::here("Statistics", "R", ...)
+here_lab_data = function (...) here::here("Lab_paper2_data", ...)
+here_out = function (...) here::here(
+  "Lab_paper2_output", "lab_figures_yannik", ...)
+
+library(magrittr)
+library(ggplot2)
+library(cowplot)
+library(dplyr)
+
+# Load settings
+source(here_r("setup.R"))
+source(here_r("functions.R"))
+
+# Load half violin package
+source(here_r("RainCloudPlots", "R_rainclouds.R"))
+
+# Load data
+#  Single data contains only one blood sample per participant
+single_data = read.csv(here_lab_data(
+  "Global_Data", "Final_Lab_Single_20200904.csv"), stringsAsFactors = F)
+
+###############################################################################
+# Clean data
+
+data = single_data
+
+#  Unique labels
+data[data=="Positiv" | data=="pos." | data=="reactive" |
+     data=="positive"] = "Positive"
+data[data=="Negativ" | data=="Indeterminate" | data=="neg." | data=="ind." | 
+     data=="nonreactive" | data=="negative"] = "Negative"
+
+#  Remove Roche 0 values
+val_cols = grep("roche_COI", colnames(data), value=T)
+res_cols = grep("roche_Interpretation", colnames(data), value=T)
+cat("# Roche == 0 before removal:", sum(data[,val_cols]==0, na.rm=T), "\n")
+for (j in 1:length(val_cols)) {
+  # Conveniently, the order is the same
+  val_col = val_cols[[j]]
+  res_col = res_cols[[j]]
+  data[data[,val_col]==0 & !is.na(data[,val_col]), res_col] = NA
+  data[data[,val_col]==0 & !is.na(data[,val_col]), val_col] = NA
+}
+
+#  Add binary ground truth column
+data['Ground truth'] = ifelse(
+  is.na(data$model_outcome), "Unknown",
+        ifelse(data$model_outcome=="true_positive", "True-positive",
+               "True-negative"))
+data$`Ground truth` = factor(
+  as.character(data$`Ground truth`),
+  levels = c("Unknown", "True-negative", "True-positive"))
+
+#  NT to categories with correct ordering
+data$NT = factor(as.character(data$NT),
+                 levels = c("<10", "10", "20", "40", ">80"))
+
+###############################################################################
+# Check data consistency
+
+# Assertions
+if (length(unique(single_data$blut_ID)) != nrow(single_data)) {
+  stop("Blood id not unique")
+}
+if (length(unique(single_data$tln_ID)) != nrow(single_data)) {
+  stop("Participant id not unique")
+}
+
+#' Check consistency of reported values according to assumed thresholds
+check_consistency = function(val_cols, res_cols, threshold) {
+  for (j in 1:length(val_cols)) {
+    # Assuming that value and result columns have the same order
+    val_col = val_cols[[j]]
+    res_col = res_cols[[j]]
+    by_value = sum(data[,val_col]>=threshold, na.rm=T)
+    by_cat = sum(data[,res_col] == "Positive", na.rm=T)
+    if (by_value != by_cat) {
+      stop(paste("Mismatch positives (exp./act.)", by_value, by_cat))
+    }
+    by_value = sum(data[,val_col]<threshold, na.rm=T)
+    by_cat = sum(data[,res_col] == "Negative", na.rm=T)
+    if (by_value != by_cat) {
+      stop(paste("Mismatch negatives (exp./act.)", by_value, by_cat))
+    }
+  }
+}
+
+#  Roche
+val_cols = grep("roche_COI", colnames(data), value=T)
+res_cols = grep("roche_Interpretation", colnames(data), value=T)
+check_consistency(val_cols, res_cols, 1.0)
+if (any(data[,val_cols]==0, na.rm=T)) {
+  stop("There are Roche zero values.")
+}
+
+#  Euroimmun
+val_cols = grep("eur_quotient", colnames(data), value=T)
+res_cols = grep("eur_der_test_result", colnames(data), value=T)
+check_consistency(val_cols, res_cols, 1.1)
+if (any(data[,val_cols]==0, na.rm=T)) {
+  stop("There are Euroimmun zero values.")
+}
+
+# Use corrected data frame
+single_data = data
+
+###############################################################################
+# Some statistics
+cat("# rows:", nrow(single_data), "\n")
+cat("# columns:", ncol(single_data), "\n")
+cat("# Ground truths:", sum(!is.na(single_data$model_outcome)),
+    sum(single_data$`Ground truth`!="Unknown"), "\n")
+cat("# True-positive:", sum(single_data$`Ground truth`=="True-positive"), "\n")
+cat("# True-negative:", sum(single_data$`Ground truth`=="True-negative"), "\n")
+
+# Tidy up
+rm(data, val_cols, res_cols, val_col, res_col, j)
+```
+
+# Duplicate concordance analysis
+
+Here, we look at concordance between repeated measurements of a test, i.e. replicate values taken from the same blood sample. We look at Euroimmun IgA and IgG, and Roche IgG measurements. To ensure sample independence, we consider only one blood sample per participant.
+
+## EI-S1-IgA and -IgG measurements
+
+Prepare data:
+
+```{r}
+# Rows are samples, columns repetitions (max 3)
+# Interesting columns: eur_quotient_i_{IgA,IgG}
+mult_euro = single_data[,grep("eur", colnames(single_data))]
+
+# Values data frame
+mult_euro_val = mult_euro[,grep("eur_quotient", colnames(mult_euro))]
+## Prettify column names to "Ig{A,G} {1,2,3}"
+colnames(mult_euro_val) = paste(
+  substr(colnames(mult_euro_val), 16, 18),
+  substr(colnames(mult_euro_val), 14, 14), sep=" ")
+
+# How many values are there for the different replicates?
+for (col in colnames(mult_euro_val)) {
+  cat(col, sum(!is.na(mult_euro_val[,col])), "\n")
+}
+
+# Too few cases of replicate 3 -> disregard
+mult_euro_val = mult_euro_val[,!grepl("3", colnames(mult_euro_val))]
+
+# Tidy up
+rm(col)
+```
+
+Scatter plots:
+
+```{r, fig.height=3.5, fig.width=7}
+# Scatter plots
+plt_iga = scatter(mult_euro_val, "IgA 1", "IgA 2",
+                  "Replicate 1", "Replicate 2",
+                  cutoff1=cutoff$old$Eur_IgA, cutoff2=cutoff$old$Eur_IgA,
+                  stat_x=-1.5, stat_y=0.6,
+                  ann_x=c(0.5, 2, 0.5, 2), ann_y=c(0.08, 0.08, 10, 10),
+                  title="EI-S1-IgA replicates")
+plt_igg = scatter(mult_euro_val, "IgG 1", "IgG 2",
+                  "Replicate 1", "Replicate 2",
+                  cutoff1=cutoff$old$Eur_IgG, cutoff2=cutoff$old$Eur_IgG,
+                  stat_x=-1.5, stat_y=0.6,
+                  ann_x=c(0.5, 2, 0.5, 2), ann_y=c(0.08, 0.08, 10, 10),
+                  title="EI-S1-IgG replicates")
+
+# Correlation plot
+corr = Hmisc::rcorr(as.matrix(log10(mult_euro_val)), type="pearson")
+ggcorrplot::ggcorrplot(
+  corr$r, type="lower", show.diag=T, lab=T,
+  legend.title="", title="Pearson correlations")
+
+# Merge plots
+plt_rep_eur = ggpubr::ggarrange(plt_iga, plt_igg, nrow=1)
+plt_rep_eur
+
+# Save plot
+for (fmt in style$output_formats) {
+  #ggsave(here_out(paste0("Replicates_Euroimmun_Scatter.", fmt)),
+  #       device=fmt, dpi=style$dpi, width=7, height=3.5, units="in")
+}
+
+# Tidy up
+rm(plt_iga, plt_igg, corr, fmt)
+```
+
+```{r}
+rbind(
+  qualitative_2x2_table(mult_euro_val, "IgA 1", "IgA 2", cutoff$old$Eur_IgA,
+                        cutoff$old$Eur_IgA, label="IgA 1/2, Old threshold"),
+  qualitative_2x2_table(mult_euro_val, "IgA 1", "IgA 2", cutoff$new$Eur_IgA,
+                        cutoff$new$Eur_IgA, label="IgA 1/2, New threshold"),
+  qualitative_2x2_table(mult_euro_val, "IgG 1", "IgG 2", cutoff$old$Eur_IgG,
+                        cutoff$old$Eur_IgG, label="IgG 1/2, Old threshold"),
+  qualitative_2x2_table(mult_euro_val, "IgG 1", "IgG 2", cutoff$new$Eur_IgG,
+                        cutoff$new$Eur_IgG, label="IgG 1/2, New threshold")
+)
+```
+
+CAPTION: Scatter plots of two Euroimmun S1 IgA and Euroimmun S1 IgG measurement replicates, for the same blood sample. The blue lines indicate linear regression lines with standard errors. Pearson correlation coefficients R of the log-scaled values are also indicated in the plot. Dashed lines indicate manufacturer decision thresholds (value of 1.1 for both IgA and IgG). The numbers n indicate the numbers of points in the respective quadrants.
+
+The correlations are good, in particular for IgG, while IgA shows more variability. IgA-IgG correlations are lower, as expected, as these measure two different features.
+
+The scatter plots allow to assess how far off the diagonal the values are.
+
+All integrated in a single plot:
+
+```{r, fig.width=6, fig.height=6}
+#PerformanceAnalytics::chart.Correlation(log10(mult_euro_val), histogram=T)
+```
+
+Having looked so far at the quantitative results, next, we create contingency tables of the qualitative results. For simple visualization of the agreement, we use a bar plot of the percentages.
+
+Here we use the old cut-off, as we want to compare the values of the manufacturer directly.
+
+```{r, fig.width=4, fig.height=3.5}
+# Create categorical result data frame
+data = mult_euro_val
+iga_cols = grep("IgA", colnames(data), value=T)
+igg_cols = grep("IgG", colnames(data), value=T)
+data[,iga_cols] = ifelse(data[,iga_cols]>=cutoff$old$Eur_IgA,
+                         "Positive", "Negative")
+data[,igg_cols] = ifelse(data[,igg_cols]>=cutoff$old$Eur_IgG,
+                         "Positive", "Negative")
+
+# Create contingency matrices in data frame (separate IgA and IgG)
+contis = create_contingency_matrix(data, classifiers=c("IgA", "IgG"))
+# To long format
+contis_long = reshape2::melt(contis, id.vars=c("Methods", "total"), 
+                             value.name="Percentage")
+colnames(contis_long)[colnames(contis_long) == "variable"] = "Outcomes"
+
+# Prettify
+contis_long$Methods = stringr::str_replace_all(
+  contis_long$Methods, c(" & "=" \n& ", "1"="Rep. 1", "2"="Rep. 2"))
+
+# Remember
+contis_long_euroimmun = contis_long
+
+ggplot(contis_long,
+       aes(fill=Outcomes, color=Outcomes, x=Methods, y=Percentage)) +
+  geom_bar(position="fill", stat="identity", alpha=0.5) +
+  geom_text(data=contis_long[!duplicated(contis_long$Methods),],
+            aes(x=Methods, y=1.05, label=total), color="black") +
+  scale_y_continuous(labels=scales::percent) +
+  scale_fill_manual(values=style$pal4, ) + 
+  scale_color_manual(values=style$pal4, )
+
+# Save plot
+for (fmt in style$output_formats) {
+  #ggsave(here_out(paste0("Replicates_Euroimmun_Bar.", fmt)),
+  #       device=fmt, dpi=style$dpi, width=4, height=3.5, units="in")
+}
+
+rm(data, iga_cols, igg_cols, contis, contis_long, fmt)
+```
+
+CAPTION: Qualitative agreement of the outcome of Euroimmun S1 IgA and Euroimmun S1 IgG measurement replicates.
+
+We see that for IgA there are batch effects.
+
+## Ro-N-Ig
+
+Now, we repeat basically the same for Roche. Here, we have in total 2 machines, each with up to 4 measurements (but a lot of sparsity).
+Prepare data:
+
+```{r}
+mult_roche = single_data[,c("machine_1", "machine_2",
+                            grep("roche_COI", colnames(single_data), value=T))]
+
+old_machine_cols =
+  c("roche_COI_1_1", "roche_COI_2_1", "roche_COI_3_1", "roche_COI_4_1")
+new_machine_cols =
+  c("roche_COI_1_2", "roche_COI_2_2", "roche_COI_3_2", "roche_COI_4_2")
+
+if (nrow(mult_roche[mult_roche$machine_1=="new" &
+                    !is.na(mult_roche$machine_2),]) > 0) {
+  stop("The Roche machine assignment is wrong.")
+}
+
+# move values where machine 1 is "new" to the second set of entries
+mult_roche[mult_roche$machine_1=="new" &
+           !is.na(mult_roche$machine_1), new_machine_cols] =
+  mult_roche[mult_roche$machine_1=="new" &
+             !is.na(mult_roche$machine_1), old_machine_cols]
+# and remove old entries
+mult_roche[mult_roche$machine_1=="new" &
+           !is.na(mult_roche$machine_1), old_machine_cols] = NA
+
+# Add columns aggregating machine 1 and machine 2
+df = mult_roche
+mult_roche$M2 =
+  ifelse(!is.na(df$roche_COI_4_2), df$roche_COI_4_2,
+         ifelse(!is.na(df$roche_COI_3_2), df$roche_COI_3_2,
+                ifelse(!is.na(df$roche_COI_2_2), df$roche_COI_2_2,
+                       df$roche_COI_1_2)))
+mult_roche$M1 =
+  ifelse(!is.na(df$roche_COI_4_1), df$roche_COI_4_1,
+         ifelse(!is.na(df$roche_COI_3_1), df$roche_COI_3_1,
+                ifelse(!is.na(df$roche_COI_2_1), df$roche_COI_2_1,
+                       df$roche_COI_1_1)))
+
+# Add columns aggregating replicates
+mult_roche$Rep1 =
+  ifelse(!is.na(df$roche_COI_1_2), df$roche_COI_1_2, df$roche_COI_1_1)
+mult_roche$Rep2 =
+  ifelse(!is.na(df$roche_COI_2_2), df$roche_COI_2_2, df$roche_COI_2_1)
+mult_roche$Rep3 =
+  ifelse(!is.na(df$roche_COI_3_2), df$roche_COI_3_2, df$roche_COI_3_1)
+mult_roche$Rep4 =
+  ifelse(!is.na(df$roche_COI_4_2), df$roche_COI_4_2, df$roche_COI_4_1)
+
+# Simplify column names
+rep_cols = paste(
+  "Roche", substr(grep("COI", colnames(mult_roche), value=T), 11, 13))
+colnames(mult_roche)[grep("COI", colnames(mult_roche))] = rep_cols
+
+# How many values are there for the different replicates?
+for (col in rep_cols) {
+  cat(col, sum(!is.na(mult_roche[,col])), "\n")
+}
+# intersections (rep. 3 and 4 have too few entries)
+rep_cols = paste("Roche", c("1_1", "2_1", "1_2", "2_2"))
+for (i in 1:(length(rep_cols)-1)) {
+  for (j in (i+1):length(rep_cols)) {
+    cat(rep_cols[i], "&", rep_cols[j],
+        sum(!is.na(mult_roche[,rep_cols[i]]) &
+            !is.na(mult_roche[,rep_cols[j]])), "\n")
+  }
+}
+cat("Roche M1 & M2",
+    sum(!is.na(mult_roche[,"M1"]) & !is.na(mult_roche[,"M2"])), "\n")
+cat("Roche Rep1 & Rep2",
+    sum(!is.na(mult_roche[,"Rep1"]) & !is.na(mult_roche[,"Rep2"])), "\n")
+
+rm(col, rep_cols, i, j, df, old_machine_cols, new_machine_cols)
+```
+
+### Scatter plots for single replicates
+
+```{r, fig.height=3.5, fig.width=10.5}
+# Scatter plots
+plt_11_21 = scatter(mult_roche, "Roche 1_1", "Roche 2_1",
+                    name1="Machine 1, Replicate 1",
+                    name2="Machine 1, Replicate 2",
+                    cutoff1=cutoff$old$Roche, cutoff2=cutoff$old$Roche,
+                    stat_x=0.1, stat_y=-0.5,
+                    ann_x=c(0.3, 3, 0.3, 3), ann_y=c(0.08, 0.08, 50, 50))
+plt_11_12 = scatter(mult_roche, "Roche 1_1", "Roche 1_2",
+                    name1="Machine 1, Replicate 1",
+                    name2="Machine 2, Replicate 1",
+                    cutoff1=cutoff$old$Roche, cutoff2=cutoff$old$Roche,
+                    stat_x=0.1, stat_y=-0.5,
+                    ann_x=c(0.3, 3, 0.3, 3), ann_y=c(0.08, 0.08, 50, 50))
+plt_12_22 = scatter(mult_roche, "Roche 1_2", "Roche 2_2",
+                    name1="Machine 2, Replicate 1",
+                    name2="Machine 2, Replicate 2",
+                    cutoff1=cutoff$old$Roche, cutoff2=cutoff$old$Roche,
+                    stat_x=0.1, stat_y=-0.5,
+                    ann_x=c(0.3, 3, 0.3, 3), ann_y=c(0.08, 0.08, 50, 50))
+
+# Merge plots
+plt = ggpubr::ggarrange(plt_11_21, plt_11_12, plt_12_22, nrow=1)
+plt
+
+# Save plot
+for (fmt in style$output_formats) {
+  #ggsave(here_out(paste0("Replicates_Roche_Scatter_Single.", fmt)),
+  #       device=fmt, dpi=style$dpi, width=10.5, height=3.5, units="in")
+}
+
+# Tidy up
+rm(plt_11_21, plt_11_12, plt_12_22, plt, fmt)
+```
+
+CAPTION: Scatter plots of Roche N IgG measurement replicates, either on the same machine (left), or across machines (right). The repeated measurements were performed using the same blood sample. The blue lines indicate linear regression lines with standard errors. Pearson correlation coefficients R and associated p-value of the log-scaled values are also indicated in the plot. Dashed lines indicate manufacturer decision thresholds (value of 1.0). The numbers n indicate the numbers of points in the respective quadrants.
+
+### Scatter plots condensed to Machine / Replicate comparison
+
+```{r, fig.height=3.5, fig.width=7}
+# Scatter plots
+plt_m = scatter(mult_roche, "M1", "M2",
+                name1="Machine 1", name2="Machine 2",
+                title="Ro-N-Ig machines",
+                cutoff1=cutoff$old$Roche, cutoff2=cutoff$old$Roche,
+                stat_x=0.1, stat_y=-0.5,
+                ann_x=c(0.3, 3, 0.3, 3), ann_y=c(0.08, 0.08, 50, 50))
+plt_r = scatter(mult_roche, "Rep1", "Rep2",
+                name1="Replicate 1", name2="Replicate 2",
+                title="Ro-N-Ig: replicates",
+                cutoff1=cutoff$old$Roche, cutoff2=cutoff$old$Roche,
+                stat_x=0.1, stat_y=-0.5,
+                ann_x=c(0.3, 3, 0.3, 3), ann_y=c(0.08, 0.08, 50, 50))
+plt_rep_roche = ggpubr::ggarrange(plt_m, plt_r, nrow=1)
+plt_rep_roche
+
+# Save plot
+for (fmt in style$output_formats) {
+  #ggsave(here_out(paste0("Replicates_Roche_Scatter.", fmt)),
+  #       device=fmt, dpi=style$dpi, width=7, height=3.5, units="in")
+}
+
+rm(plt_m, plt_r, fmt)
+```
+
+```{r}
+rbind(
+  qualitative_2x2_table(mult_roche, "Roche 1_1", "Roche 2_1", cutoff$old$Roche,
+                        cutoff$old$Roche, label="Roche 1_1/2_1, Old threshold"),
+  qualitative_2x2_table(mult_roche, "Roche 1_1", "Roche 2_1", cutoff$new$Roche,
+                        cutoff$new$Roche, label="Roche 1_1/2_1, New threshold"),
+  qualitative_2x2_table(mult_roche, "Roche 1_1", "Roche 1_2", cutoff$old$Roche,
+                        cutoff$old$Roche, label="Roche 1_1/1_2, Old threshold"),
+  qualitative_2x2_table(mult_roche, "Roche 1_1", "Roche 1_2", cutoff$new$Roche,
+                        cutoff$new$Roche, label="Roche 1_1/1_2, New threshold")
+)
+```
+
+### Bar plot for single replicates
+
+```{r, fig.width=5, fig.height=3.5}
+# Create categorical result data frame
+data_res = mult_roche[paste("Roche", c("1_1", "2_1", "1_2", "2_2"))]
+data_res = ifelse(data_res>=cutoff$old$Roche, "Positive", "Negative")
+
+# Create contingency matrices in data frame
+contis = create_contingency_matrix(data_res)
+# To long format
+contis_long = reshape2::melt(contis, id.vars=c("Methods", "total"), 
+                             value.name="Percentage")
+colnames(contis_long)[colnames(contis_long) == 'variable'] = "Outcomes"
+
+# Remove 1_2 vs 2_1 which has only 2 entries
+contis_long = contis_long[
+  contis_long$Methods %in%c("Roche 1_1 & Roche 1_2", "Roche 1_1 & Roche 2_1",
+                            "Roche 1_2 & Roche 2_2"),]
+
+# Prettify Method names
+contis_long$Methods = stringr::str_replace_all(
+  contis_long$Methods,
+  c(" & "="\n& ", "Roche 1_1"="M. 1 Rep. 1", "Roche 1_2"="M. 2 Rep. 1",
+    "Roche 2_1"="M. 1 Rep. 2", "Roche 2_2"="M. 2 Rep. 2"))
+
+# Remember  
+contis_long_roche = contis_long
+
+ggplot(contis_long, aes(fill=Outcomes, color=Outcomes,
+                        x=Methods, y=Percentage)) +
+  geom_bar(position="fill", stat="identity", alpha=0.5) +
+  scale_y_continuous(labels=scales::percent) +
+  geom_text(data=contis_long[!duplicated(contis_long$Methods),],
+            aes(x=Methods, y=1.05, label=total), color="black") +
+  scale_fill_manual(values=style$pal4) + scale_color_manual(values=style$pal4)
+
+# Save plot
+for (fmt in style$output_formats) {
+  #ggsave(here_out(paste0("Replicates_Roche_Bar_Single.", fmt)),
+  #device=fmt, dpi=style$dpi, width=4, height=3.5, units="in")
+}
+
+rm(data_res, contis, contis_long, fmt)
+```
+
+CAPTION: Qualitative agreement of the outcome of Roche N measurement replicates. The manufacturer decision thresholds were used to decide whether a test is positive or negative.
+
+# Bar plots condensed to Machine / Replicate comparison
+
+```{r, fig.width=4.5, fig.height=3.5}
+# Create categorical result data frame
+data_res = mult_roche[c("M1", "M2", "Rep1", "Rep2")]
+data_res = ifelse(data_res>=cutoff$old$Roche, "Positive", "Negative")
+
+# Create contingency matrices in data frame
+contis = create_contingency_matrix(data_res)
+# To long format
+contis_long = reshape2::melt(contis, id.vars=c("Methods", "total"),
+                             value.name="Percentage")
+colnames(contis_long)[colnames(contis_long) == 'variable'] = "Outcomes"
+
+# Remove 1_2 vs 2_1 which has only 2 entries
+contis_long = contis_long[
+  contis_long$Methods %in% c("M1 & M2", "Rep1 & Rep2"),]
+
+# Remember
+contis_long_roche_2 = contis_long
+
+ggplot(contis_long,
+       aes(fill=Outcomes, color=Outcomes, x=Methods, y=Percentage)) +
+  geom_bar(position="fill", stat="identity", alpha=0.5) +
+  scale_y_continuous(labels=scales::percent) +
+  geom_text(data=contis_long[!duplicated(contis_long$Methods),],
+            aes(x=Methods, y=1.05, label=total), color="black") +
+  scale_fill_manual(values=style$pal4) + scale_color_manual(values=style$pal4)
+
+# Save plot
+for (fmt in style$output_formats) {
+  #ggsave(here_out(paste0("Replicates_Roche_Bar.", fmt)),
+  #       device=fmt, dpi=style$dpi, width=4, height=3.5, units="in")
+}
+
+rm(data_res, contis, contis_long, fmt)
+```
+
+## Qualitative plot for Euroimmun and Roche combined
+
+### With single Roche replicates
+
+```{r, fig.width=7, fig.height=3.5}
+contis_long = rbind(contis_long_euroimmun, contis_long_roche)
+
+# Clean up labels
+contis_long[contis_long=="IgA Rep. 1 \n& IgA Rep. 2"] =
+  "EI-S1-IgA:\nRep. 1 & 2"
+contis_long[contis_long=="IgG Rep. 1 \n& IgG Rep. 2"] =
+  "EI-S1-IgG:\nRep. 1 & 2"
+contis_long[contis_long=="M. 1 Rep. 1\n& M. 1 Rep. 2"] =
+  "Ro-N-Ig:\nM. 1 Rep. 1 & 2"
+contis_long[contis_long=="M. 1 Rep. 1\n& M. 2 Rep. 1"] =
+  "Ro-N-Ig:\nM. 1 & 2 Rep. 1"
+contis_long[contis_long=="M. 2 Rep. 1\n& M. 2 Rep. 2"] =
+  "Ro-N-Ig:\nM. 2 Rep. 1 & 2"
+
+# Prettiy columns names
+colnames(contis_long)[colnames(contis_long)=="Outcomes"] ="Test outcomes"
+colnames(contis_long)[colnames(contis_long)=="Methods"] = "Tests"
+
+ggplot(contis_long, aes(fill=`Test outcomes`, color=`Test outcomes`, 
+                        x=Tests, y=Percentage)) +
+  geom_bar(position="fill", stat="identity", alpha=0.5) +
+  scale_y_continuous(labels=scales::percent) +
+  geom_text(data=contis_long[!duplicated(contis_long$Tests),],
+            aes(x=Tests, y=1.05, label=total), color="black") +
+  scale_fill_manual(values=style$pal4) + scale_color_manual(values=style$pal4)
+
+# Save plot
+for (fmt in style$output_formats) {
+  #ggsave(here_out(paste0("Replicates_Main_Bar_Single.", fmt)),
+  #device=fmt, dpi=style$dpi, width=7, height=3.5, units="in")
+}
+
+rm(contis_long, fmt)
+```
+
+### With Roche reduced
+
+```{r, fig.width=5, fig.height=3.5}
+contis_long = rbind(contis_long_euroimmun, contis_long_roche_2)
+
+# Clean up labels
+contis_long[contis_long=="IgA Rep. 1 \n& IgA Rep. 2"] = "EI-S1-IgA:\nRep. 1 & 2"
+contis_long[contis_long=="IgG Rep. 1 \n& IgG Rep. 2"] = "EI-S1-IgG:\nRep. 1 & 2"
+contis_long[contis_long=="M1 & M2"] = "Ro-N-Ig:\nM. 1 & 2"
+contis_long[contis_long=="Rep1 & Rep2"] = "Ro-N-Ig:\nRep. 1 & 2"
+
+# Remove machine comparison
+contis_long = contis_long[contis_long$Methods!="Ro-N-Ig:\nM. 1 & 2",]
+
+# Prettiy columns names
+colnames(contis_long)[colnames(contis_long)=="Outcomes"] = "Test outcomes"
+colnames(contis_long)[colnames(contis_long)=="Methods"] = "Tests"
+
+plt_rep_bar = ggplot(contis_long, aes(fill=`Test outcomes`, color=`Test outcomes`, x=Tests, y=Percentage)) +
+  geom_bar(position="fill", stat="identity", alpha=0.5) +
+  scale_y_continuous(labels=scales::percent) +
+  geom_text(data=contis_long[!duplicated(contis_long$Tests),],
+            aes(x=Tests, y=1.05, label=total), color="black") +
+  scale_fill_manual(values=style$pal4) + scale_color_manual(values=style$pal4) +
+  labs(x="")
+plt_rep_bar
+
+# Save plot
+for (fmt in style$output_formats) {
+  #ggsave(here_out(paste0("Replicates_Main_Bar.", fmt)),
+  #       device=fmt, dpi=style$dpi, width=6, height=3.5, units="in")
+}
+
+rm(contis_long, fmt)
+```
+
+## Qualitative plot colored by ground truth
+
+Excluded. There seem to be no replicates for true negatives
+
+```{r}
+# data = single_data 
+# 
+# old_machine_cols = c("roche_COI_1_1", "roche_COI_2_1",
+#                      "roche_COI_3_1", "roche_COI_4_1")
+# new_machine_cols = c("roche_COI_1_2", "roche_COI_2_2",
+#                      "roche_COI_3_2", "roche_COI_4_2")
+# 
+# # move values where machine 1 is "new" to the second set of entries
+# data[data$machine_1=="new" & !is.na(data$machine_1), new_machine_cols] = 
+#   data[data$machine_1=="new" & !is.na(data$machine_1), old_machine_cols]
+# # and remove old entries
+# data[data$machine_1=="new" & !is.na(data$machine_1), old_machine_cols] = NA
+# 
+# data = data %>% dplyr::rename(
+#   "IgA 1"="eur_quotient_1_IgA", "IgA 2"="eur_quotient_2_IgA",
+#   "IgG 1"="eur_quotient_1_IgG", "IgG 2"="eur_quotient_2_IgG",
+#   "Roche 1_1"="roche_COI_1_1", "Roche 1_2"="roche_COI_1_2",
+#   "Roche 2_1"="roche_COI_2_1")
+# data = data[data$`Ground truth`!="Unknown",]
+# 
+# # Get for all combination of measurements an indicator as PP, NP, PN, or NN
+# pairs = list(c("IgA 1", "IgA 2"), c("IgG 1", "IgG 2"),
+#              c("Roche 1_1", "Roche 1_2"), c("Roche 1_1", "Roche 2_1"))
+# cols = unique(unlist(pairs))
+# for (col in cols[1:2]) {
+#   data[,col] = ifelse(data[,col]>=cutoff$old$Eur_IgA, "Positive", "Negative")
+# }
+# for (col in cols[3:4]) {
+#   data[,col] = ifelse(data[,col]>=cutoff$old$Eur_IgG, "Positive", "Negative")
+# }
+# for (col in cols[5:7]) {
+#   data[,col] = ifelse(data[,col]>=cutoff$old$Roche, "Positive", "Negative")
+# }
+# 
+# pair_cols = c()
+# for (pair in pairs) {
+#   col1 = pair[1]
+#   col2 = pair[2]
+#   pair_col = paste(col1, col2, sep=" & ")[1]
+#   pair_cols = c(pair_cols, pair_col)
+#   data[,pair_col] = 
+#     ifelse(data[col1]=="Positive" & data[col2]=="Positive", "PP",
+#            ifelse(data[col1]=="Positive" & data[col2]=="Negative", "PN",
+#                   ifelse(data[col1]=="Negative" & data[col2]=="Positive", "NP",
+#                          ifelse(data[col1]=="Negative" & data[col2]=="Negative",
+#                                 "NN", NA))))
+# }
+# 
+# data_long = data %>% tidyr::gather(Methods, Outcomes, pair_cols)
+# # Remove NA outcome
+# data_long = data_long[!is.na(data_long$Outcomes),]
+# 
+# ggplot(data=data_long, aes(x=Outcomes, fill=`Ground truth`)) +
+#   facet_wrap(~Methods, scales = "free_y") +
+#   geom_bar(stat="count", alpha=0.5)
+# 
+# rm(pair, pairs, pair_cols, data, data_long, old_machine_cols, new_machine_cols,
+#    col, cols, col1, col2, pair_col)
+```
+
+Clear up
+
+```{r}
+rm(contis_long_euroimmun, contis_long_roche, contis_long_roche_2, mult_euro,
+   mult_euro_val, mult_roche)
+```
+
+# Distribution of main methods
+
+Here, we look at the agreement between the main tests Euroimmun IgA, Euroimmun IgG, and Roche IgG.
+
+```{r, fig.height=3, fig.width=12}
+data = extract_last_values(single_data)[,c(columns$main, "Ground truth")]
+
+rec_old = get_recovery_rates(
+  data, columns$main, cutoffs=cutoff$old, cutoff_label="Old")
+rec_new = get_recovery_rates(
+  data, columns$main, cutoffs=cutoff$new, cutoff_label="New")
+rownames(rec_old) = rec_old$Method
+rownames(rec_new) = rec_new$Method
+
+hist_iga = stacked_distr(
+  data=data, col="Eur_IgA", rec_old=rec_old, rec_new=rec_new,
+  col_pretty=columns_pretty$eur_iga,
+  x_old_pos=1.9, x_old_neg=0.06, x_new_pos=1.9, x_new_neg=0.06, y_txt=800,
+  y_pct=850)
+
+hist_igg = stacked_distr(
+  data=data, col="Eur_IgG", rec_old=rec_old, rec_new=rec_new,
+  col_pretty=columns_pretty$eur_igg,
+  x_old_pos=1.9, x_old_neg=0.5, x_new_pos=1.9, x_new_neg=0.5, y_txt=1000,
+  y_pct=1050)
+
+hist_roche = stacked_distr(
+  data=data, col="Roche", rec_old=rec_old, rec_new=rec_new,
+  col_pretty=columns_pretty$roche,
+  x_old_pos=2.4, x_old_neg=1/2.4, x_new_pos=2, x_new_neg=1/2, y_txt=3700,
+  y_pct=3800, sec_axis_name="Cumulative distribution")
+
+plt_main_distr = ggpubr::ggarrange(hist_iga + theme(legend.position = "none"),
+                                   hist_igg + theme(legend.position = "none"),
+                                   hist_roche, nrow=1, widths = c(4,4,5.8))
+plt_main_distr
+
+# Save plot
+for (fmt in style$output_formats) {
+  #ggsave(here_out(paste0("Main_Distribution.", fmt)),
+  #       device=fmt, dpi=style$dpi, width=12, height=3, units="in")
+}
+
+rm(data, rec_old, rec_new, hist_iga, hist_igg, hist_roche, fmt)
+```
+
+CAPTION: Distribution of measurement values for the main methods Euroimmun S1 IgA, Euroimmun S1 IgG, and Roche N. Manufacturer decision thresholds for the respective method are indicated by dashed lines. The colors indicate cases known to be positive or negative, or for which such knowledge is not available. The histograms for all 3 classes are stacked above each other.
+
+## Qualitative agreement of main tests and ground truth
+
+The following is not used.
+
+```{r, fig.width=5, fig.height=3.5}
+data = extract_last_values(single_data)
+rec = get_recovery_rates(data, columns$main, cutoff$new)
+# Total number of cases with measurement and ground truth
+rec$total = rec[,"p"] + rec[,"n"]
+
+# To fraction
+val_cols = c("p_truepos", "n_truepos", "p_trueneg", "n_trueneg")
+rec[,val_cols] = rec[,val_cols] / rec[,"total"]
+
+# To long
+rec_long = reshape2::melt(
+  rec[,c("Method", "total", val_cols)],
+  id.vars=c("Method", "total"), value.name="Percentage")
+colnames(rec_long)[colnames(rec_long) == 'variable'] = "Outcomes"
+
+# Prettify
+for (i in 1:length(columns$main)) {
+  rec_long[rec_long$Method==columns$main[i],"Test"] = columns_pretty$main[i]
+}
+rec_long$Outcomes = as.character(rec_long$Outcomes)
+outcomes_old = c("p_truepos", "n_truepos", "p_trueneg", "n_trueneg")
+outcomes_new = c(
+  "Test-positive & True-positive", "Test-negative & True-positive",
+  "Test-positive & True-negative", "Test-negative & True-negative")
+for (i in 1:length(outcomes_old)) {
+  rec_long[rec_long==outcomes_old[i]] = outcomes_new[i]
+}
+rec_long$`Test outcomes` = factor(rec_long$Outcomes, levels=outcomes_new)
+
+ggplot(rec_long, aes(fill=`Test outcomes`, color=`Test outcomes`,
+                     x=Test, y=Percentage)) +
+  # Stacked percentage bars
+  geom_bar(position="fill", stat="identity", alpha=0.5) +
+  # Totals
+  geom_text(data=rec_long[!duplicated(rec_long$Test),],
+            aes(x=Test, y=1.05, label=total), color="black") +
+  # Transform y axis labels to percent
+  scale_y_continuous(labels=scales::percent) +
+  scale_fill_manual(values=style$pal4) +
+  scale_color_manual(values=style$pal4) +
+  labs(x="")
+
+# Save plot
+for (fmt in style$output_formats) {
+  #ggsave(here_out(paste0("Main_GroundTruth_Accordance.", fmt)),
+  #       device=fmt, dpi=style$dpi, width=6.5, height=3.5, units="in")
+}
+
+rm(data, rec, val_cols, rec_long, outcomes_old, outcomes_new, i, fmt)
+```
+
+What is missing here though is a "zoom-in" also on the small percentage of positive cases. So, let's split up into negatives and positives. The following is an alternative to the above figures:
+
+```{r, fig.height=3, fig.width=7}
+plt_main_gt_bar = test_gt_bars(
+  single_data, columns$main, columns_pretty$main, 3, cutoff)
+plt_main_gt_bar
+
+# Save plot
+for (fmt in style$output_formats) {
+  #ggsave(here_out(paste0("GroundTruth_Main_Split_Accordance.", fmt)),
+  #       device=fmt, dpi=style$dpi, width=7, height=3.5, units="in")
+}
+
+rm(fmt)
+```
+
+Exchanging the roles of Test outcome and Ground truth (excluded):
+
+```{r, fig.height=3, fig.width=6}
+gt_test_bars(
+  single_data, columns$main, columns_pretty$main, 3, cutoff$new, "")
+```
+
+# Distribution of confirmatory tests
+
+## NT and cPass
+
+```{r, fig.width=5, fig.height=3}
+data = single_data
+
+# Get recovery rates
+data_cts = to_numeric(data)
+cols = c("cPass", "NT")
+rec_old = get_recovery_rates(
+  data_cts, cols, cutoffs=cutoff$old, cutoff_label="Old")
+rec_new = get_recovery_rates(
+  data_cts, cols, cutoffs=cutoff$new, cutoff_label="New")
+rownames(rec_old) = rec_old$Method
+rownames(rec_new) = rec_new$Method
+
+# NT
+plt_nt = ggplot(data %>% dplyr::filter(!is.na(NT)),
+                aes(x=NT, color=`Ground truth`, fill=`Ground truth`)) + 
+  geom_bar(alpha=0.5) +
+  # Thresholds
+  #  Only new
+  geom_vline(aes(xintercept=1.5, linetype=style$thr_lb_new),
+             color=style$thr_lc_new) +
+  #  Use linetype aesthetic to create a separate legend
+  scale_linetype_manual(name="Cut-off", values=c(style$thr_lt_new)) +
+  # Percentage annotations
+  annotate("text", size=3, color=style$col_truepos, hjust="left",
+            x=1.5 + 0.1, y=190,
+           label=sprintf("%.0f%%", rec_new["NT", "frac_pos_rec"] * 100)) +
+  annotate("text", size=3, color=style$col_trueneg, hjust="right",
+            x=1.5 - 0.1, y=190,
+           label=sprintf("%.0f%%", rec_new["NT", "frac_neg_rec"] * 100)) +
+  labs(x=paste0(
+    columns_pretty$nt, " (n=", sum(!is.na(data$NT)), ")"), y="Count") +
+  scale_fill_manual(values=style$pal3) + scale_color_manual(values=style$pal3)
+plt_nt
+
+# cPass
+plt_cpass = ggplot(data,
+                   aes(x=cPass, fill=`Ground truth`, color=`Ground truth`)) +
+  geom_histogram(alpha=0.5, position="stack") +  
+  # Thresholds
+  geom_vline(aes(xintercept=cutoff$old$cPass, linetype=style$thr_lb_old),
+             color=style$thr_lc_old) +
+  geom_vline(aes(xintercept=cutoff$new$cPass, linetype=style$thr_lb_new),
+             color=style$thr_lc_new) +
+  #  Use linetype aesthetic to create a separate legend
+  scale_linetype_manual(
+    name="Cut-off", values=c(style$thr_lt_old,style$thr_lt_new)) +
+  annotate("text", size=3, color=style$col_truepos, hjust="center",
+            x=cutoff$old$cPass + 10, y=35,
+           label=sprintf("%.0f%%", rec_new["cPass", "frac_pos_rec"] * 100)) +
+  annotate("text", size=3, color=style$col_trueneg, hjust="center",
+            x=cutoff$old$cPass - 30, y=35,
+           label=sprintf("%.0f%%", rec_new["cPass", "frac_neg_rec"] * 100)) +
+  annotate("text", size=3, color=style$col_truepos, hjust="center",
+            x=cutoff$old$cPass + 10, y=30,
+           label=sprintf("(%.0f%%)", rec_old["cPass", "frac_pos_rec"] * 100)) +
+  annotate("text", size=3, color=style$col_trueneg, hjust="center",
+            x=cutoff$old$cPass - 30, y=30,
+           label=sprintf("(%.0f%%)", rec_old["cPass", "frac_neg_rec"] * 100)) +
+  labs(x=paste0(
+    columns_pretty$cpass,
+    " [%] (n=", sum(!is.na(data$cPass)), ")"), y="Count") +
+  scale_fill_manual(values=style$pal3) + scale_color_manual(values=style$pal3)
+plt_cpass
+
+rm(data, data_cts, rec_old, rec_new, cols)
+```
+
+CAPTION: Distribution of measurement values for NT and cPass. The dashed lines indicate the respective manufacturer test decision thresholds. Coloring as in Figure TODO.
+
+```{r}
+data = to_numeric(single_data)
+cols = c("NT", "cPass")
+rbind(get_recovery_rates(data, cols, cutoffs=cutoff$old, cutoff_label="Old"),
+      get_recovery_rates(data, cols, cutoffs=cutoff$new, cutoff_label="New"))
+
+rm(data, cols)
+```
+
+## Array
+
+```{r, fig.height=5, fig.width=12}
+cols = columns$vc
+cols_pretty = columns_pretty$vc
+
+# Remove the new cutoffs for VC-non-IgG
+cutoff_tmp = new.env()
+cutoff_tmp$old = cutoff$old
+cutoff_tmp$new = cutoff$new
+for (col in grep("(IgA|IgM)", columns$vc, value=T)) {
+  cutoff_tmp$new[col] = NA
+}
+
+data = data_long_for_viola(
+  single_data, columns$vc, columns_pretty$vc, "<10", cutoff_tmp)
+data_long = data[[1]]
+data_long_inv = data[[2]]
+
+# Violin plots and jitter for the continuous part
+plt_up = jitter_violin_plot(
+  data_long, cols_pretty=cols_pretty,
+  ylimits=c(2,1000), ybreaks=c(2.3,10,100,1000),
+  ylabels=c("<10","10","100","1000"),
+  ymeas=700, thr_shift=0.05)
+plt_up
+
+# Histogram for the discrete part
+plt_down = discrete_bar_plot(data_long_inv, ylimits=c(0,150))
+plt_down
+
+# Insert histogram into the continuous plot (parameters require manual tuning
+#  depending on figure size)
+plt_vc_distr = plt_up + annotation_custom(
+  ggplotGrob(plt_down + theme(legend.position = "none")),
+  ymin=0.15, ymax=0.7, xmin=0.3, xmax=9.7)
+plt_vc_distr
+
+# Save plot
+for (fmt in style$output_formats) {
+  #ggsave(here_out(paste0("Array_Distribution.", fmt)),
+  #       device=fmt, dpi=style$dpi, width=12, height=5, units="in")
+}
+
+rm(data, data_long, data_long_inv, cols, cols_pretty, cutoff_tmp, plt_up,
+   plt_down, fmt, col)
+```
+
+CAPTION: Distribution of measurement values for the nine Array tests. The tests do not give quantitative values below 10. Thus, in the lower part histograms over all values classified as <10 are shown. In the upper part, jittered point plots and violin plots are shown. Color coding is as in Figure TODO. The percentage numbers around the threshold lines indicate the percentage of true positives identified as positive according to the threshold (red number above line), resp. the percentage of true negatives identified as negative (blue number below line).
+
+Recovery of true positives and negatives by the 2 thresholds:
+
+```{r}
+data = to_numeric(single_data)
+get_recovery_rates(data, columns$vc, cutoffs=cutoff$old, cutoff_label="Old")
+get_recovery_rates(data, columns$vc, cutoffs=cutoff$new, cutoff_label="New")
+rm(data)
+```
+
+Restricted to IgG:
+
+```{r, fig.height=3, fig.width=5}
+cols = grep("IgG", columns$vc, value=T)
+cols_pretty = grep("IgG", columns_pretty$vc, value=T)
+
+data = data_long_for_viola(single_data, cols, cols_pretty, "<10", cutoff)
+data_long = data[[1]]
+data_long_inv = data[[2]]
+
+# Violin plots and jitter for the continuous part
+plt_up = jitter_violin_plot(
+  data_long, cols_pretty=cols_pretty,
+  ylimits=c(2,1000), ybreaks=c(2.3,10,100,1000),
+  ylabels=c("<10","10","100","1000"),
+  ymeas=700, thr_shift=0.10, violin_width=0.6)
+plt_up
+
+# Histogram for the discrete part
+plt_down = discrete_bar_plot(data_long_inv, ylimits=c(0,195))
+plt_down
+
+# Insert histogram into the continuous plot (parameters require manual tuning
+#  depending on figure size)
+plt_vc_distr_igg = plt_up + annotation_custom(
+  ggplotGrob(plt_down + theme(legend.position = "none")),
+  ymin=0.15, ymax=0.7, xmin=0.3, xmax=3.7)
+plt_vc_distr_igg
+
+# Save plot
+for (fmt in style$output_formats) {
+  #ggsave(here_out(paste0("Array_Distribution_IgG.", fmt)),
+  #       device=fmt, dpi=style$dpi, width=5, height=4, units="in")
+}
+
+rm(data, data_long, data_long_inv, cols, cols_pretty, plt_up, plt_down, fmt)
+```
+
+## Line blot
+
+```{r, fig.height=3, fig.width=5}
+cols = columns$lineblot
+cols_pretty = columns_pretty$lineblot
+
+data = data_long_for_viola(
+  single_data, cols, cols_pretty, "not_reactive", cutoff)
+data_long = data[[1]]
+data_long_inv = data[[2]]
+
+# Violin plots and jitter for the continuous part
+plt_up = jitter_violin_plot(
+  data_long, cols_pretty=cols_pretty,
+  ylimits=c(0.3,30), ybreaks=c(0.4,1,3,10),
+  ylabels=c("<1","1","3","10"),
+  ymeas=30, thr_shift=0.07, violin_width=0.7,
+  show_old_percent = F)
+plt_up
+
+# Histogram for the discrete part
+plt_down = discrete_bar_plot(data_long_inv, ylimits=c(0,170))
+plt_down
+
+# Combine plots
+plt_lineblot_distr = plt_up + annotation_custom(
+  ggplotGrob(plt_down + theme(legend.position = "none")),
+  ymin=-0.65, ymax=-0.15, xmin=0.3, xmax=3.7)
+plt_lineblot_distr
+
+# Save plot
+for (fmt in style$output_formats) {
+  #ggsave(here_out(paste0("LineBlot_Distribution.", fmt)),
+  #       device=fmt, dpi=style$dpi, width=5, height=5, units="in")
+}
+
+rm(data, data_long, data_long_inv, cols, cols_pretty, plt_up, plt_down, fmt)
+```
+
+CAPTION: Distribution of measurement values for the three Line Blot tests. Figure setup as in Figure TODO.
+
+Recovery of true positives and negatives by the 2 thresholds:
+
+```{r}
+data = to_numeric(single_data)
+rbind(
+  get_recovery_rates(
+    data, columns$lineblot, cutoff=cutoff$old, cutoff_label="Old"),
+  get_recovery_rates(
+    data, columns$lineblot, cutoff=cutoff$new, cutoff_label="New")
+)
+rm(data)
+```
+
+# Common Cold
+
+## Distribution
+
+```{r, fig.height=3, fig.width=6}
+cols = columns$cold
+cols_pretty = columns_pretty$cold
+
+# add dummy cutoffs, same as for lineblot
+cutoff_tmp = cutoff
+for (col in cols) { 
+  cutoff_tmp$old[col] = 1
+  cutoff_tmp$new[col] = NA
+}
+
+data = data_long_for_viola(
+  single_data, cols, cols_pretty, "not_reactive", cutoff)
+data_long = data[[1]]
+data_long_inv = data[[2]]
+
+# Violin plots and jitter for the continuous part
+plt_up = jitter_violin_plot(
+  data_long, cols_pretty=cols_pretty,
+  ylimits=c(0.3,30), ybreaks=c(0.4,1,3,10),
+  ylabels=c("<1","1","3","10"),
+  ymeas=20, thr_shift=0.07, violin_width=0.7,
+  show_new_line = F, show_new_percent = F)
+plt_up
+
+# Histogram for the discrete part
+plt_down = discrete_bar_plot(data_long_inv, ylimits=c(0,120))
+plt_down
+
+# Combine plots
+plt_cold = plt_up + annotation_custom(
+  ggplotGrob(plt_down + theme(legend.position = "none")),
+  ymin=-0.67, ymax=-0.23, xmin=0.3, xmax=4.7)
+plt_cold
+
+# Save plot
+for (fmt in style$output_formats) {
+  #ggsave(here_out(paste0("CommonCold_Distribution.", fmt)),
+  #       device=fmt, dpi=style$dpi, width=6, height=3.5, units="in")
+}
+
+rm(data, data_long, data_long_inv, cols, cols_pretty, cutoff_tmp, plt_up,
+   plt_down, fmt, col)
+```
+
+## Distribution tests
+
+Two-sample Kolmogorov-Smirnov tests of the distributions.
+
+Correction: 
+
+```{r}
+data = single_data
+# TODO Include these values as 0.5, as KW only needs ranks
+data[data=="not_reactive"] = NA
+for (col in columns$cold) {
+  data[,col] = as.numeric(data[,col])
+}
+
+# Kolmogorov-Smirnov
+#print("Kolmogorov-Smirnov")
+#for (col in columns$cold) {   
+#  print(col)
+#  positives = data[
+#    data["Ground truth"]=="True-positive" & !is.na(data[,col]), col]
+#  negatives = data[
+#    data["Ground truth"]=="True-negative" & !is.na(data[,col]), col]
+#  unknowns = data[
+#    data["Ground truth"]=="Unknown" & !is.na(data[,col]), col]
+#  print(ks.test(positives, unknowns))
+#  print(ks.test(negatives, unknowns))
+#  print(ks.test(positives, negatives))
+#}
+
+# Kruskal-Wallis / Dunn
+print("Kruskal-Wallis / Dunn")
+for (col in columns$cold) {
+  print(col)
+  formula = as.formula(paste(col, "~", "`Ground truth`"))
+  print(kruskal.test(formula, data))
+  print(FSA::dunnTest(formula, data, method="by"))
+}
+
+rm(data, col, formula)
+```
+
+## Correlations with Roche
+
+```{r, fig.width=6, fig.height=3.5}
+cols = columns$cold
+cols_pretty = columns_pretty$cold
+
+# Set discrete values to arbitrary value
+data = extract_last_values(single_data)[c("Roche", "Ground truth", cols)]
+# Set discrete part to some visually distinguishable value <1
+data[data=="not_reactive"] = 0.8
+for (col in cols) {
+  data[,col] = as.numeric(data[,col])
+}
+
+data_long = data %>% tidyr::gather(Test, Value, -c(Roche, `Ground truth`))
+
+# Prettify
+for (i in 1:length(cols)) {
+  data_long[data_long$Test==cols[i],"Test"] = cols_pretty[i]
+}
+
+# Fill non-reactives with NA on copy for statistics
+data_long_na = data_long
+data_long_na[data_long_na$Value==0.8 & !is.na(data_long_na$Value),"Value"] = NA
+
+plt_cold_roche = ggplot(data_long, aes(x=Roche, y=Value)) +
+  facet_wrap(~Test, scales = "free") +
+  geom_point(aes(col=`Ground truth`), alpha=0.5) + scale_x_log10() +
+  # Regression line
+  geom_smooth(formula=y~x, method="lm", data=data_long_na) +
+  # Pearson correlation coefficient
+  ggpubr::stat_cor(data=data_long_na) +
+  scale_y_log10(breaks=c(0.8, 1, 3, 5), labels=c("<1", 1, 3, 5)) +
+  labs(y="Line blot", x="Ro-N-Ig") +
+  scale_fill_manual(values=style$pal3) + scale_color_manual(values=style$pal3)
+plt_cold_roche
+
+# Save plot
+for (fmt in style$output_formats) {
+  #ggsave(here_out(paste0("CommonCold_Roche_Scatter.", fmt)),
+  #       device=fmt, dpi=style$dpi, width=6, height=3.5, units="in")
+}
+
+rm(data, data_long, data_long_na, fmt, cols, cols_pretty, col, i)
+```
+
+## Correlations with IgG
+
+```{r, fig.width=6, fig.height=3.5}
+cols = columns$cold
+cols_pretty = columns_pretty$cold
+
+# Set discrete values to arbitrary value
+data = extract_last_values(single_data)[c("Eur_IgG", "Ground truth", cols)]
+# Set discrete part to some visually distinguishable value <1
+data[data=="not_reactive"] = 0.8
+for (col in cols) {
+  data[,col] = as.numeric(data[,col])
+}
+
+data_long = data %>% tidyr::gather(Test, Value, -c(Eur_IgG, `Ground truth`))
+
+# Prettify
+for (i in 1:length(cols)) {
+  data_long[data_long$Test==cols[i],"Test"] = cols_pretty[i]
+}
+
+# Fill non-reactives with NA on copy for statistics
+data_long_na = data_long
+data_long_na[data_long_na$Value==0.8 & !is.na(data_long_na$Value),"Value"] = NA
+
+ggplot(data_long, aes(x=Eur_IgG, y=Value)) +
+  facet_wrap(~Test, scales = "free") +
+  geom_point(aes(col=`Ground truth`), alpha=0.5) + scale_x_log10() +
+  geom_smooth(formula=y~x, method="lm", data=data_long_na) +
+  ggpubr::stat_cor(data=data_long_na) +
+  scale_y_log10(breaks=c(0.8, 1, 3, 5), labels=c("<1", 1, 3, 5)) +
+  labs(y="Line blot", x="Roche N pan-Ig") +
+  scale_fill_manual(values=style$pal3) + scale_color_manual(values=style$pal3)
+
+# Save plot
+for (fmt in style$output_formats) {
+  #ggsave(here_out(paste0("CommonCold_EuroimmunIgG_Scatter.", fmt)),
+  #       device=fmt, dpi=style$dpi, width=6, height=3.5, units="in")
+}
+
+rm(data, data_long, data_long_na, fmt, cols, cols_pretty, col, i)
+```
+
+# Comparison of the main tests (Figure 4)
+
+## EI-S1-IgG vs Ro-N-Ig (Excluded)
+
+```{r, fig.width=5, fig.height=3.5}
+data = extract_last_values(single_data)[c(columns$main, "Ground truth")]
+
+# Prettify
+for (i in 1:length(columns$main)) {
+  colnames(data)[colnames(data)==columns$main[i]] = columns_pretty$main[i]
+}
+
+plt_roche_igg = ggplot(data, aes(x=`Ro-N-Ig`, y=`EI-S1-IgG`)) +
+  geom_point(aes(col=`Ground truth`), alpha=0.5) +
+  scale_x_log10() + scale_y_log10() +
+  # Threshold lines
+  geom_vline(aes(xintercept = cutoff$old$Roche),
+             linetype = style$thr_lt_old, color=style$thr_lc_old) +
+  geom_vline(aes(xintercept = cutoff$new$Roche),
+             linetype = style$thr_lt_new, color=style$thr_lc_new) +
+  geom_hline(aes(yintercept = cutoff$old$Eur_IgG,
+                 linetype = style$thr_lb_old), color=style$thr_lc_old) +
+  geom_hline(aes(yintercept = cutoff$new$Eur_IgG,
+                 linetype = style$thr_lb_new), color=style$thr_lc_new) +
+  scale_linetype_manual(
+    name="Cut-off", values=c(style$thr_lt_old,style$thr_lt_new)) +
+  #geom_smooth(formula=y~x, method="lm") +
+  ggpubr::stat_cor() +
+  scale_fill_manual(values=style$pal3) + scale_color_manual(values=style$pal3)
+plt_roche_igg
+
+# Save plot
+for (fmt in style$output_formats) {
+  #ggsave(here_out(paste0("Roche_EuroimmunIgG_Scatter.", fmt)),
+  #       device=fmt, dpi=style$dpi, width=5, height=3.5, units="in")
+}
+
+cols = c(columns_pretty$eur_igg, columns_pretty$roche)
+# Correlation of all (as in plot)
+Hmisc::rcorr(log10(as.matrix(data[cols])))
+# Correlation of only True-positives
+Hmisc::rcorr(
+  log10(as.matrix(data[data$`Ground truth`=="True-positive", cols])))
+# Correlation of only True-negatives
+Hmisc::rcorr(
+  log10(as.matrix(data[data$`Ground truth`=="True-negative", cols])))
+# Correlation of only Unknowns
+Hmisc::rcorr(log10(as.matrix(data[data$`Ground truth`=="Unknown", cols])))
+
+rm(data, cols, fmt, i)
+```
+
+CAPTION: Scatter plot of the main tests Euroimmun S1 IgG vs Roche N IgG. The dashed lines indicate the manufacturer decision thresholds (1.1 for Euroimmun S1 IgG and 1.0 for Roche N IgG). Coloring by known true or negative cases. The R value indicates the Pearson correlation coefficient, with associated p-value. The numbers n indicate the number of cases in the respective quadrants.
+
+## EI-S1-IgA vs -IgG (Excluded)
+
+```{r, fig.width=5, fig.height=3.5}
+data = extract_last_values(single_data)[c(columns$main, "Ground truth")]
+
+for (i in 1:length(columns$main)) {
+  colnames(data)[colnames(data)==columns$main[i]] = columns_pretty$main[i]
+}
+
+plt_iga_igg = ggplot(data, aes(x=`EI-S1-IgA`, y=`EI-S1-IgG`)) +
+  geom_point(aes(col=`Ground truth`), alpha=0.5) +
+  scale_x_log10() +scale_y_log10() +
+  # Thresholds
+  geom_vline(aes(xintercept = cutoff$old$Eur_IgA),
+             linetype = style$thr_lt_old, color=style$thr_lc_old) +
+  geom_vline(aes(xintercept = cutoff$new$Eur_IgA),
+             linetype = style$thr_lt_new, color=style$thr_lc_new) +
+  geom_hline(aes(yintercept = cutoff$old$Eur_IgG,
+                 linetype = style$thr_lb_old), color=style$thr_lc_old) +
+  geom_hline(aes(yintercept = cutoff$new$Eur_IgG,
+                 linetype = style$thr_lb_new), color=style$thr_lc_new) +
+  scale_linetype_manual(
+    name="Cut-off", values=c(style$thr_lt_old,style$thr_lt_new)) +
+  #geom_smooth(formula=y~x, method="lm") +
+  ggpubr::stat_cor() +
+  # geom_abline(linetype="dashed") +
+  scale_fill_manual(values=style$pal3) + scale_color_manual(values=style$pal3)
+plt_iga_igg
+
+# Save plot
+for (fmt in style$output_formats) {
+  #ggsave(here_out(paste0("EuroimmunIgA_EuroimmunIgG_Scatter.", fmt)),
+  #       device=fmt, dpi=style$dpi, width=5, height=3.5, units="in")
+}
+
+cols = c("EI-S1-IgA","EI-S1-IgG")
+# Correlation of all (as in plot)
+Hmisc::rcorr(log10(as.matrix(data[cols])))
+# Correlation of only True-positives
+Hmisc::rcorr(
+  log10(as.matrix(data[data$`Ground truth`=="True-positive", cols])))
+# Correlation of only True-negatives
+Hmisc::rcorr(
+  log10(as.matrix(data[data$`Ground truth`=="True-negative", cols])))
+# Correlation of only Unknowns
+Hmisc::rcorr(log10(as.matrix(data[data$`Ground truth`=="Unknown", cols])))
+
+rm(data, cols, fmt, i)
+```
+
+## Qualitative comparison
+
+```{r, fig.height=3.5, fig.width=5}
+# Here we use the new cutoff only
+cutoffs = cutoff$new
+
+data = extract_last_values(single_data)
+data[columns_pretty$eur_iga] = ifelse(
+  data[columns$eur_iga] >= cutoffs$Eur_IgA, "Positive", "Negative")
+data[columns_pretty$eur_igg] = ifelse(
+  data[columns$eur_igg] >= cutoffs$Eur_IgG, "Positive", "Negative")
+data[columns_pretty$roche] = ifelse(
+  data[columns$roche] >= cutoffs$Roche, "Positive", "Negative")
+data = data[columns_pretty$main]
+
+# Create contingency matrices as data frame
+contis = create_contingency_matrix(data)
+# To long format
+contis_long = reshape2::melt(contis, id.vars=c("Methods", "total"), 
+                             value.name="Percentage")
+colnames(contis_long)[colnames(contis_long) == 'variable'] = "Test outcomes"
+contis_long$Methods = stringr::str_replace(contis_long$Methods, " & ", " \n& ")
+
+plt_main_pairs = ggplot(contis_long,
+                        aes(fill=`Test outcomes`, color=`Test outcomes`,
+                            x=Methods, y=Percentage)) +
+  # Stacked percentage bars
+  geom_bar(position="fill", stat="identity", alpha=0.5) +
+  # Total numbers
+  geom_text(data=contis_long[!duplicated(contis_long$Methods),],
+            aes(x=Methods, y=1.05, label=total), color="black") +
+  # y axis to percent
+  scale_y_continuous(labels=scales::percent) +
+  scale_fill_manual(values=style$pal4) +
+  scale_color_manual(values=style$pal4) +
+  labs(x="")
+plt_main_pairs
+
+# Save plot
+for (fmt in style$output_formats) {
+  #ggsave(here_out(paste0("Main_Accordance.", fmt)),
+  #       device=fmt, dpi=style$dpi, width=6, height=3.5, units="in")
+}
+
+rm(data, contis, contis_long, fmt, cutoffs)
+```
+
+CAPTION: Qualitative agreement of the main tests. The manufacturer decision thresholds were used to decide whether a test is positive or negative.
+
+# Qualitative concordance of tests and ground truth
+
+TODO The following plot should probably be replaced by the subsequent one.
+
+```{r, fig.width=16, fig.height=3.5}
+data = to_numeric(extract_last_values(single_data))
+
+rec = get_recovery_rates(data, columns$all, cutoff$new)
+# Total number of cases with measurement and ground truth
+rec$total = rec[,"n"] + rec[,"p"]
+
+# To percent
+val_cols = c("p_truepos", "n_truepos", "p_trueneg", "n_trueneg")
+rec[,val_cols] = rec[,val_cols] / rec[,"total"]
+
+# To long
+rec_long = reshape2::melt(
+  rec[,c("Method", "total", val_cols)],
+  id.vars=c("Method", "total"), value.name="Percentage")
+colnames(rec_long)[colnames(rec_long) == 'variable'] = "Outcomes"
+
+# Prettify methods
+cols_pretty = stringr::str_replace_all(
+  columns_pretty$all, c("Euroimmun "="Euroimmun \n", "Roche "="Roche \n"))
+
+rec_long$Method = as.character(rec_long$Method)
+for (i in 1:length(columns$all)) {
+  rec_long[rec_long==columns$all[i]] = cols_pretty[i]
+}
+# For correct order
+rec_long$Method = factor(rec_long$Method, levels=cols_pretty)
+
+# Prettifiy indicators
+val_cols_pretty = c(
+  "Test-positive - True-positive", "Test-negative - True-positive",
+  "Test-positive - True-negative", "Test-negative - True-negative")
+rec_long$Outcomes = as.character(rec_long$Outcomes)
+for (i in 1:length(val_cols)) {
+  rec_long[rec_long$Outcomes==val_cols[i] &
+           !is.na(rec_long$Outcomes), "Outcomes"] = val_cols_pretty[i]
+}
+rec_long$Outcomes = factor(rec_long$Outcomes, levels=val_cols_pretty)
+
+ggplot(rec_long, aes(fill=Outcomes, color=Outcomes, x=Method, y=Percentage)) + 
+  geom_bar(position="fill", stat="identity", alpha=0.5) +
+  theme(axis.text.x = element_text(angle=0, vjust=0.5)) +
+  geom_text(data=rec_long[!duplicated(rec_long$Method),],
+            aes(x=Method, y=1.05, label=total), color="black") +
+  scale_fill_manual(values=style$pal4) + scale_color_manual(values=style$pal4)
+
+# Save plot
+for (fmt in style$output_formats) {
+  #ggsave(here_out(paste0("All_GroundTruth_Accordance.", fmt)),
+  #       device=fmt, dpi=style$dpi, width=26, height=3.5, units="in")
+}
+
+rm(rec, val_cols, rec_long, i, val_cols_pretty, cols_pretty, data, fmt)
+```
+
+Split up into true positives and true negatives:
+
+```{r, fig.width=12, fig.height=2.5}
+# Test indices of interest (sorry, not pretty)
+ixs = c(1, 2, 5, 8, 11, 12, 13, 14)
+cols = columns$confirmatory[ixs]
+cols_pretty = columns_pretty$confirmatory[ixs]
+plt_test_gt_bars_conf = test_gt_bars(
+  single_data, cols, cols_pretty, 8, cutoff)
+plt_test_gt_bars_conf
+
+rm(ixs, cols, cols_pretty)
+```
+
+All confirmatory tests:
+
+```{r, fig.width=12, fig.height=4}
+cols = columns$confirmatory
+cols_pretty = columns_pretty$confirmatory
+
+# Remove the new cutoffs for VC-non-IgG
+cutoff_tmp = new.env()
+cutoff_tmp$old = cutoff$old
+cutoff_tmp$new = cutoff$new
+for (col in grep("(IgA|IgM)", columns$vc, value=T)) {
+  cutoff_tmp$new[col] = NA
+}
+
+plt_test_gt_bars_conf_all =
+  test_gt_bars(single_data, cols, cols_pretty, 7, cutoff_tmp)
+plt_test_gt_bars_conf_all
+
+# Save plot
+for (fmt in style$output_formats) {
+  #ggsave(here_out(paste0("GroundTruth_All_Split_Accordance.", fmt)),
+  #       device=fmt, dpi=500, width=12, height=4, units="in")
+}
+
+rm(cols, cols_pretty, cutoff_tmp, col, fmt)
+```
+
+# Additional plots
+
+## Number of positives for each test (Excluded)
+
+```{r}
+data = extract_last_values(single_data)
+data = data[!is.na(data$cPass_result),]
+methods_list = list(
+  c("Eur_IgG_result"), c("Roche_result"), c("Eur_IgG_result", "Roche_result"),
+  c("Eur_IgG_result", "Roche_result", "cPass_result"),
+  c("Eur_IgG_result", "Roche_result", "NT_result"),
+  c("Eur_IgG_result", "Roche_result", "cPass_result", "NT_result"))
+
+data_long = data.frame(Methods=character(), Positive=double())
+for (methods in methods_list) {
+  print(methods)
+  data$Positive = F
+  for (method in methods) {
+    print(method)
+    data[is.na(data[,method]),"Positive"] = NA
+    data$Positive = data$Positive | data[,method]=="Positive"
+  }
+  print(sum(data$Positive==T, na.rm=T))
+  fraction = sum(data$Positive==T, na.rm=T) / sum(!is.na(data$Positive))
+  data_long = data_long %>% tibble::add_row(
+    Methods=paste(methods, collapse=" | "),
+    Positive=fraction)
+}
+
+ggplot(data=data_long, aes(x=Methods, y=Positive)) + geom_col() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+
+rm(data, data_long, methods, method, fraction)
+```
+
+## Parallel line plots (Spaghetti plots)
+
+```{r, fig.width=9, fig.height=3.5}
+cols = columns$vc
+cols_pretty = columns_pretty$vc
+
+# Remove the new cutoffs for VC-non-IgG
+cutoff_tmp = new.env()
+cutoff_tmp$old = cutoff$old
+cutoff_tmp$new = cutoff$new
+for (col in grep("(IgA|IgM)", cols, value=T)) {
+  cutoff_tmp$new[col] = NA
+}
+
+plp_vc = spaghetti_with_discrete(
+  single_data, cols, cols_pretty, "<10", 7, cutoff_tmp,
+  c(7,10,30,100,300), c("<10","10","30","100","300"))
+plp_vc
+
+# Save plot
+for (fmt in style$output_formats) {
+  #ggsave(here_out(paste0("Array_Spaghetti.", fmt)),
+  #       device=fmt, dpi=style$dpi, width=9, height=3.5, units="in")
+}
+
+rm(cutoff_tmp, cols, cols_pretty, fmt)
+```
+
+Only IgG
+
+```{r, fig.width=4.5, fig.height=3.5}
+cols = grep("IgG", columns$vc, value=T)
+cols_pretty = grep("IgG", columns_pretty$vc, value=T)
+
+plp_vc_igg = spaghetti_with_discrete(
+  single_data, cols, cols_pretty, "<10", 7, cutoff,
+  c(7,10,30,100,300), c("<10","10","30","100","300"))
+plp_vc_igg
+
+rm(cols, cols_pretty)
+```
+
+```{r, fig.width=4.5, fig.height=3.5}
+plp_lineblot = spaghetti_with_discrete(
+  single_data, columns$lineblot, columns_pretty$lineblot,
+  "not_reactive", 0.7, cutoff,
+  c(0.7,1,3,10), c("<1", "1", "3","10"))
+plp_lineblot
+```
+
+CAPTION: Parallel coordinate plot for the Array and the Line Blot tests. The lines connect values for the same sample. Coloring by known positive and negative cases.
+
+```{r, fig.width=6, fig.height=4}
+data = extract_last_values(single_data)
+
+data_long = data %>% tidyr::gather(Array, Concentration, columns$main)
+data_long$Concentration = as.numeric(data_long$Concentration)
+# For plotting, we need the array IDs as numbers
+for (i in 1:length(columns$main)) {
+  data_long[data_long$Array==columns$main[i] &
+            !is.na(data_long$Array),"Array_i"] = as.character(i)
+}
+# Cutoffs
+for (col in columns$main) {
+  data_long[data_long$Array==col,"Old_cutoff"] = cutoff$old[col]
+  data_long[data_long$Array==col,"New_cutoff"] = cutoff$new[col]
+}
+
+plt_spaghetti_main = ggplot(data=data_long,
+                            aes(y=Concentration, x=Array_i, group=tln_ID,
+                                color=`Ground truth`)) +
+  geom_line(alpha = 0.07) + geom_point(alpha = 0.5) +
+  # Horizontal lines for decision thresholds
+  geom_segment(data=data_long[!duplicated(data_long["Array_i"]),],
+               color=style$thr_lc_old,
+               aes(x=as.numeric(Array_i)-0.5, y=as.numeric(Old_cutoff),
+                   xend=as.numeric(Array_i)+0.5, yend=as.numeric(Old_cutoff),
+                   linetype=style$thr_lb_old)) +
+  geom_segment(data=data_long[!duplicated(data_long["Array_i"]),],
+               color=style$thr_lc_new,
+               aes(x=as.numeric(Array_i)-0.5, y=as.numeric(New_cutoff),
+                   xend=as.numeric(Array_i)+0.5, yend=as.numeric(New_cutoff),
+                   linetype=style$thr_lb_new)) +
+  scale_linetype_manual(
+    name="Cut-off", values=c(style$thr_lt_old,style$thr_lt_new)) +
+  # Decoration
+  scale_x_discrete(labels=columns_pretty$main) + scale_y_log10() +
+  scale_fill_manual(values=style$pal3) +
+  scale_color_manual(values=style$pal3) +
+  labs(x="", y="Measurement value")
+plt_spaghetti_main
+
+# Save plot
+for (fmt in style$output_formats) {
+  #ggsave(here_out(paste0("Main_Spaghetti.", fmt)),
+  #       device=fmt, dpi=style$dpi, width=6, height=4, units="in")
+}
+
+rm(data, data_long, i, col, fmt)
+```
+
+# Final integrated figures
+
+## Primary distributions (Figure 2)
+
+```{r, fig.width=12, fig.height=6}
+plot_grid(
+  title_plot(
+    "A Distributions of primary tests",
+    plt_main_distr),
+  title_plot(
+    "B Reliability of the primary tests on multiple measurements",
+    plot_grid(plt_rep_bar, NULL, rel_widths=c(2,2.5))),
+  nrow=2)
+
+# Save plot
+for (fmt in style$output_formats) {
+  ggsave(here_out(paste0("Fig2_Primary_Distribution.", fmt)), device=fmt,
+         dpi=style$dpi, width=12, height=6, units="in")
+}
+```
+
+## Primary comparison (Figure 4)
+
+```{r, fig.width=12, fig.height=6}
+load(here_r("Lab-Fig-6-Part-A.RData"))
+
+plot_grid(
+  plot_grid(
+    title_plot("A Performance comparison of primary tests", plot_grid(iga.igg, roche.igg)),
+    title_plot("B Parallel coordinate plot of primary tests", plt_spaghetti_main),
+    nrow=1, rel_widths = c(3,2)),
+  plot_grid(
+    title_plot("C Concordance of primary tests", plt_main_pairs),
+    title_plot("D Concordance of primary tests and ground truth", plt_main_gt_bar),
+    nrow=1, rel_widths = c(2,3)),
+  nrow=2
+)
+
+# Save plot
+for (fmt in style$output_formats) {
+  ggsave(here_out(paste0("Fig4_Primary_Comparison.", fmt)), device=fmt,
+         dpi=style$dpi, width=12, height=6, units="in")
+}
+```
+
+## Confirmatory distribution and comparison (Figure 5)
+
+```{r, fig.width=12, fig.height=9}
+plot_grid(
+  plot_grid(
+    title_plot("A Distribution of NT", plt_nt + theme(legend.position="none")),
+    title_plot("B Distribution of VC-IgG and MG", plot_grid(
+      plt_vc_distr_igg + theme(legend.position="none"), plt_lineblot_distr + theme(legend.position="none"),
+      get_legend(plt_vc_distr_igg), rel_widths=c(2,2,1), nrow=1)),
+    rel_widths=c(4,11)),
+  plot_grid(
+    title_plot("C Distribution of GS-cPass", plt_cpass + theme(legend.position="none")),
+    title_plot("D Parallel coordinate plots for VC-IgG and MG", plot_grid(
+      plp_vc_igg + theme(legend.position="none"), plp_lineblot + theme(legend.position="none"),
+      get_legend(plp_vc_igg), rel_widths=c(2,2,1), nrow=1)),
+    rel_widths=c(4,11)),
+  title_plot("E Concordance of confirmatory tests and ground truth", plt_test_gt_bars_conf),
+  ncol=1, rel_heights = c(2,2,1.5)
+)
+
+# Save plot
+for (fmt in style$output_formats) {
+  ggsave(here_out(paste0("Fig5_Confirmatory_Distribution.", fmt)), device=fmt,
+         dpi=style$dpi, width=12, height=9, units="in")
+}
+```
+
+## Common Cold (Supplementary Figure 9)
+
+```{r, fig.width=12, fig.height=3.5}
+plot_grid(
+  title_plot("A Distribution of Common Cold tests", plt_cold + theme(legend.position = "none")),
+  title_plot("B Comparison of Common Cold tests and Ro-N-Ig", plt_cold_roche + theme(legend.position = "none")),
+  get_legend(plt_cold), nrow=1, rel_widths=c(2.3,2,0.7))
+
+# Save plot
+for (fmt in style$output_formats) {
+  ggsave(here_out(paste0("FigSupp9_Cold.", fmt)), device=fmt,
+         dpi=style$dpi, width=12, height=4, units="in")
+}
+```
+
+## Main replicates (Supplementary Figure 1)
+
+```{r, fig.height=7, fig.width=7}
+cowplot::plot_grid(plt_rep_eur, plt_rep_roche, nrow=2, labels="AUTO")
+
+# Save plot
+for (fmt in style$output_formats) {
+  ggsave(here_out(paste0("FigSupp1_Replicates_Scatter.", fmt)), device=fmt,
+         dpi=style$dpi, width=7, height=7, units="in")
+}
+```
+
+## Full VC Array distribution and comparison (Supplementary Figure 4)
+
+```{r, fig.width=12, fig.height=10}
+plot_grid(
+  title_plot("A Distribution of VC", plt_vc_distr),
+  title_plot("B Parallel coordinate plot of VC", plp_vc),
+  nrow=2
+)
+# Save plot
+for (fmt in style$output_formats) {
+  ggsave(here_out(paste0("FigSupp4_VC.", fmt)), device=fmt,
+         dpi=style$dpi, width=12, height=10, units="in")
+}
+```
+
+## Full Confirmatory Performances (Supplementary Figure 5)
+
+```{r, fig.width=12, fig.height=4}
+plt_test_gt_bars_conf_all
+
+# Save plot
+for (fmt in style$output_formats) {
+  ggsave(here_out(paste0("FigSupp5_GroundTruth_All_Split_Accordance.", fmt)), device=fmt,
+         dpi=style$dpi, width=12, height=4, units="in")
+}
+```

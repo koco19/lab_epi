@@ -1,0 +1,10 @@
+igraph
+ggmap
+ggplot2
+dplyr
+tidyr
+rgdal
+spdep
+descr
+randomForest
+sampling

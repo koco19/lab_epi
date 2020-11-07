@@ -1,0 +1,13 @@
+Group.1,Group.2,x
+<=19,male,[frequency_integer]
+20-34,male,[frequency_integer]
+35-49,male,[frequency_integer]
+50-64,male,[frequency_integer]
+65-79,male,[frequency_integer]
+>=80,male,[frequency_integer]
+<=19,female,[frequency_integer]
+20-34,female,[frequency_integer]
+35-49,female,[frequency_integer]
+50-64,female,[frequency_integer]
+65-79,female,[frequency_integer]
+>=80,female,[frequency_integer]

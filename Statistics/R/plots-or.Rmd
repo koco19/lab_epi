@@ -1,0 +1,186 @@
+---
+title: "OR Plots"
+author: "Mercè Garí"
+date: '2020-09-24'
+output:
+  flexdashboard::flex_dashboard:
+    orientation: rows
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+#rmarkdown::render("dashboard.Rmd") # to run it
+
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(ggthemes)
+library(GGally)
+library(colorspace)
+library(readxl)
+library(forcats)
+library(scales)
+
+col_grey = "#999999"
+col_trueneg = "#56B4E9" #"#0072B2"
+col_truepos = "#D55E00"
+pal <- c(col_grey, col_trueneg, col_truepos)
+
+# Load data for Odds Ratio Multivariate Analysis Roche
+d.orig <- read_xlsx("Odds Ratio _Multivariate Analysis Roche_oct5.xlsx",
+                    skip=1, sheet = 2)
+d.orig
+freq <- d.orig[,1:6]
+bayes <- d.orig[,c(1:2, 8:11)]
+
+names(d.orig)
+names(freq) <- c("Variable", "Value", "estimate", "low", "high", "pval")
+names(bayes) <- names(freq)
+
+d <- bind_rows(mutate(freq, Model="Frequentist"),
+           mutate(bayes, Model="Bayesian"))
+
+d <- d %>%
+  filter(!is.na(estimate)) %>%
+  filter(Variable != "(Intercept)") %>%
+  mutate(Value = ifelse(Value == "Age- Continous", "Continuous",
+                        Value)) %>%
+  mutate(Variable = ifelse(Variable == "LivingArea_perInhabitant",
+                           "Living Area/Inhabitant", Variable))
+
+base_breaks <- function(n = 10){
+    function(x) {
+        axisTicks(log10(range(x, na.rm = TRUE)), log = TRUE, n = n)
+    }
+}
+
+
+d <- d %>%
+  mutate(Variable = ifelse(Variable == "Risk Employment", "Employment Risk", Variable))
+d %>%
+  mutate(Parameter = paste(Variable, Value, sep = " : ")) %>%
+  mutate(Parameter = fct_inorder(factor(Parameter)),
+         Parameter = fct_rev(Parameter)) %>%
+  ggplot(aes(y=estimate, x=Parameter, color=Model)) +
+  geom_point(position=position_dodge(width=0.5)) +
+  geom_linerange(aes(ymin=low, ymax=high), 
+                 position=position_dodge(width=0.5)) +
+  coord_flip() +
+  theme_bw() +
+  scale_color_manual(values=pal[c(3,2)]) +
+    geom_hline(yintercept = 1, lty=3, color="grey30") +
+  scale_y_continuous(trans = log_trans(), breaks = base_breaks(),
+                   labels = prettyNum) + 
+  ylab("Estimate (95% CI)") + xlab("")
+
+# Save Figure in pdf and png.
+ggsave("Epi-Fig5-Model-Multivariate-201020.pdf", width=7, height=3)
+ggsave("Epi-Fig5-Model-Multivariate-201020.png", width=7, height=3)
+
+
+# Load data OR Roche
+d.orig <- read.csv("Odds Ratio _Roche1a.csv", sep=";",
+                   header=TRUE)
+str(d.orig)
+
+# Remove Age and Sex adjusted coefficients
+d.orig <- d.orig[c(1:8, 17:80),]
+
+# First model (crude)
+d1 <- d.orig[,1:6]
+d1$Model <- "Crude"
+d1 <- d1 %>%
+  filter(!is.na(OR))
+
+# Second model (adjusted)
+d2 <- d.orig[,c(1:2, 7:10)]
+d2$Model <- "Adjusted"
+names(d2) <- names(d1)
+
+# Third model (bayesian)
+d3 <- d.orig[,c(1:2, 11:14)]
+d3$Model <- "Bayesian"
+names(d3) <- names(d1)
+
+
+# Combine all three
+d <- bind_rows(d1, d2, d3) 
+d <- d %>%
+  filter(!is.na(OR))
+
+
+d$Model <- factor(d$Model, 
+                  levels=c("Bayesian", "Adjusted", "Crude"),
+                  labels=c("Bayesian", "Adjusted", "Crude"))
+
+base_breaks <- function(n = 10){
+    function(x) {
+        axisTicks(log10(range(x, na.rm = TRUE)), 
+                  log = TRUE, n = n)
+    }
+}
+
+prettyNum0 <- function(x){
+  ifelse(x > 2e-5, sprintf("%.5g", x), "0.00001")
+}
+
+
+# Unify the names between the two plots
+d$Variable  
+d <- d %>%
+  mutate(Variable = ifelse(Variable == "Loss of Sense Taste/Smell", "Loss of Sense (smell+taste)", Variable),
+         Value = ifelse(Value == "30-40sqm/individual(Q2)", "30-40sqm",
+                        ifelse(Value == "40-55sqm/individual(Q3)", "40-55sqm",
+                               ifelse(Value == ">55sqm/individual(Q4)", ">55sqm", Value))))
+
+d <- d %>%
+  mutate(Value = ifelse(Value == "<20", "14-19", Value))
+
+d %>%
+  mutate(Parameter = paste(Variable, Value, sep = " : ")) %>%
+  mutate(Parameter = fct_inorder(factor(Parameter)),
+         Parameter = fct_rev(Parameter)) %>%
+  mutate(LCI = ifelse(LCI == 0, 0.0001, LCI)) %>%
+  ggplot(aes(y=OR, x=Parameter, color=Model)) +
+  geom_point(position=position_dodge(width=0.75)) +
+  geom_linerange(aes(ymin=LCI, ymax=UCI), 
+                 position=position_dodge(width=0.75)) +
+  coord_flip() +
+  theme_bw() +
+  geom_hline(yintercept = 1, lty=3, color="grey30") +
+  scale_y_continuous(trans = log10_trans(), breaks = base_breaks(),
+                   labels = prettyNum0) + 
+  expand_limits(y=c(-1, 6)) +
+  xlab("") + ylab("OR (95% CI)") +
+  scale_color_manual(breaks=rev(levels(d$Model)),
+                     values=pal) 
+
+# Save the figure in pdf and png
+ggsave("Epi-Fig4-Model-OR-Roche1a-overlap-201021.pdf", width = 10, height=12)
+ggsave("Epi-Fig4-Model-OR-Roche1a-overlap-201021.png", width = 10, height=12)
+
+# Try another layout
+d %>%
+  mutate(Parameter = paste(Variable, Value, sep = " : ")) %>%
+   mutate(Parameter = fct_inorder(factor(Parameter)),
+         Parameter = fct_rev(Parameter)) %>%
+  mutate(LCI = ifelse(LCI == 0, 0.00001, LCI)) %>%
+  ggplot(aes(y=OR, x=Parameter, color=Model)) +
+  geom_point(position=position_dodge(width=0.5)) +
+  geom_linerange(aes(ymin=LCI, ymax=UCI), 
+                 position=position_dodge(width=0.5)) +
+  coord_flip() +
+  theme_bw() +
+  geom_hline(yintercept = 1, lty=3, color="grey30") +
+  scale_y_log10(labels=function(n){format(n, scientific = FALSE)}) +
+  #scale_y_log10(labels=comma) +
+  expand_limits(y=c(-1, 6)) +
+  xlab("") + ylab("OR (95% CI)") +
+  facet_grid(~Model, scales="free") +
+  theme(legend.position="none")
+
+```
+
+
+

@@ -1,0 +1,150 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+here_r = function (...) here::here("Statistics", "R", ...)
+here_lab_data = function (...) here::here("Lab_paper2_data", ...)
+here_lab_output = function (...) here::here("Lab_paper2_output",
+                                            "lab_figures", ...)
+
+library(magrittr)
+library(ggplot2)
+library(cowplot)
+library(dplyr)
+
+# Load settings
+source(here_r("setup.R"))
+source(here_r("functions.R"))
+
+# Load data
+#  Single data contains only one blood sample per participant
+single_data = read.csv(here_lab_data(
+  "Global_Data", "Final_Lab_Single_20200904.csv"), stringsAsFactors = F)
+
+###############################################################################
+# Clean data
+
+data = single_data
+
+#  Unique labels
+data[data=="Positiv" | data=="pos." | data=="reactive" |
+     data=="positive"] = "Positive"
+data[data=="Negativ" | data=="Indeterminate" | data=="neg." | data=="ind." | 
+     data=="nonreactive" | data=="negative"] = "Negative"
+
+#  Remove Roche 0 values
+val_cols = grep("roche_COI", colnames(data), value=T)
+res_cols = grep("roche_Interpretation", colnames(data), value=T)
+cat("# Roche == 0 before removal:", sum(data[,val_cols]==0, na.rm=T), "\n")
+for (j in 1:length(val_cols)) {
+  # Conveniently, the order is the same
+  val_col = val_cols[[j]]
+  res_col = res_cols[[j]]
+  data[data[,val_col]==0 & !is.na(data[,val_col]), res_col] = NA
+  data[data[,val_col]==0 & !is.na(data[,val_col]), val_col] = NA
+}
+
+#  Add binary ground truth column
+data['Ground truth'] = ifelse(
+  is.na(data$model_outcome), "Unknown",
+        ifelse(data$model_outcome=="true_positive", "True positive",
+               "True negative"))
+data$`Ground truth` = factor(
+  as.character(data$`Ground truth`),
+  levels = c("Unknown", "True negative", "True positive"))
+
+#  NT to categories with correct ordering
+data$NT = factor(as.character(data$NT),
+                 levels = c("<10", "10", "20", "40", ">80"))
+
+###############################################################################
+# Check data consistency
+
+# Assertions
+if (length(unique(single_data$blut_ID)) != nrow(single_data)) {
+  stop("Blood id not unique")
+}
+if (length(unique(single_data$tln_ID)) != nrow(single_data)) {
+  stop("Participant id not unique")
+}
+
+#' Check consistency of reported values according to assumed thresholds
+check_consistency = function(val_cols, res_cols, threshold) {
+  for (j in 1:length(val_cols)) {
+    # Assuming that value and result columns have the same order
+    val_col = val_cols[[j]]
+    res_col = res_cols[[j]]
+    by_value = sum(data[,val_col]>=threshold, na.rm=T)
+    by_cat = sum(data[,res_col] == "Positive", na.rm=T)
+    if (by_value != by_cat) {
+      stop(paste("Mismatch positives (exp./act.)", by_value, by_cat))
+    }
+    by_value = sum(data[,val_col]<threshold, na.rm=T)
+    by_cat = sum(data[,res_col] == "Negative", na.rm=T)
+    if (by_value != by_cat) {
+      stop(paste("Mismatch negatives (exp./act.)", by_value, by_cat))
+    }
+  }
+}
+
+#  Roche
+val_cols = grep("roche_COI", colnames(data), value=T)
+res_cols = grep("roche_Interpretation", colnames(data), value=T)
+check_consistency(val_cols, res_cols, 1.0)
+if (any(data[,val_cols]==0, na.rm=T)) {
+  stop("There are Roche zero values.")
+}
+
+#  Euroimmun
+val_cols = grep("eur_quotient", colnames(data), value=T)
+res_cols = grep("eur_der_test_result", colnames(data), value=T)
+check_consistency(val_cols, res_cols, 1.1)
+if (any(data[,val_cols]==0, na.rm=T)) {
+  stop("There are Euroimmun zero values.")
+}
+
+# Use corrected data frame
+single_data = data
+
+###############################################################################
+# Some statistics
+cat("# rows:", nrow(single_data), "\n")
+cat("# columns:", ncol(single_data), "\n")
+cat("# Ground truths:", sum(!is.na(single_data$model_outcome)),
+    sum(single_data$`Ground truth`!="Unknown"), "\n")
+cat("# True positive:", sum(single_data$`Ground truth`=="True positive"), "\n")
+cat("# True negative:", sum(single_data$`Ground truth`=="True negative"), "\n")
+
+# Tidy up
+rm(val_cols, res_cols, val_col, res_col, j)
+
+last_data = extract_last_values(single_data)
+```
+
+```{r}
+# IgA
+# Sensitivity
+data = last_data[!is.na(last_data$Eur_IgA)&!is.na(last_data$Eur_IgG)&!is.na(last_data$Roche),]
+sensi_speci = function(data, col, cutoffs, cutoff_label) {
+  print(c(col, cutoff_label))
+  
+  print(c("Sensitivity",
+          sum(data[col]>=cutoffs[col] &
+              data$`Ground truth`=="True positive", na.rm=T) /
+          sum(data$`Ground truth`=="True positive")))
+  print(c("Specificity",
+          sum(data[col]<cutoffs[col] &
+              data$`Ground truth`=="True negative", na.rm=T) /
+          sum(data$`Ground truth`=="True negative")))
+}
+  
+sensi_speci(data, "Eur_IgA", cutoff$old, "old cutoff")
+sensi_speci(data, "Eur_IgA", cutoff$new, "new cutoff")
+sensi_speci(data, "Eur_IgG", cutoff$old, "old cutoff")
+sensi_speci(data, "Eur_IgG", cutoff$new, "new cutoff")
+sensi_speci(data, "Roche", cutoff$old, "old cutoff")
+sensi_speci(data, "Roche", cutoff$new, "new cutoff")
+```
+

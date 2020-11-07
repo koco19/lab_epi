@@ -1,0 +1,445 @@
+---
+title: "Lab Paper 1st part"
+author: "Yannik Schälte"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+Compilation date: `r format(Sys.time(), '%d.%m.%Y')`
+
+The figures used in the lab manuscript are generated in the last section of
+the notebook, the previous parts creating subplots and detailed analyses.
+
+# Prepare
+
+```{r}
+here_r = function (...) here::here("Statistics", "R", ...)
+here_lab_data = function (...) here::here("Lab_paper2_data", ...)
+here_out = function (...) here::here(
+  "Lab_paper2_output", "lab_figures_yannik_DZ", ...)
+
+dir.create(here_out(), showWarnings = FALSE)
+
+library(magrittr)
+library(ggplot2)
+library(cowplot)
+library(dplyr)
+
+# Load settings
+source(here_r("setup.R"))
+source(here_r("functions.R"))
+
+# Load half violin package
+source(here_r("RainCloudPlots", "R_rainclouds.R"))
+
+# Load data
+#  Single data contains only one blood sample per participant
+single_data = read.csv(here_lab_data(
+  "Global_Data", "Final_Lab_Single_20200904.csv"), stringsAsFactors = F)
+
+###############################################################################
+# Clean data
+
+data = single_data
+
+#  Unique labels
+data[data=="Positiv" | data=="pos." | data=="reactive" |
+     data=="positive"] = "Positive"
+data[data=="Negativ" | data=="Indeterminate" | data=="neg." | data=="ind." | 
+     data=="nonreactive" | data=="negative"] = "Negative"
+
+#  Remove Roche 0 values
+val_cols = grep("roche_COI", colnames(data), value=T)
+res_cols = grep("roche_Interpretation", colnames(data), value=T)
+cat("# Roche == 0 before removal:", sum(data[,val_cols]==0, na.rm=T), "\n")
+for (j in 1:length(val_cols)) {
+  # Conveniently, the order is the same
+  val_col = val_cols[[j]]
+  res_col = res_cols[[j]]
+  data[data[,val_col]==0 & !is.na(data[,val_col]), res_col] = NA
+  data[data[,val_col]==0 & !is.na(data[,val_col]), val_col] = NA
+}
+
+#  Add binary ground truth column
+data['Ground truth'] = ifelse(
+  is.na(data$model_outcome), "Unknown",
+        ifelse(data$model_outcome=="true_positive", "True-positive",
+               "True-negative"))
+data$`Ground truth` = factor(
+  as.character(data$`Ground truth`),
+  levels = c("Unknown", "True-negative", "True-positive"))
+
+#  NT to categories with correct ordering
+data$NT = factor(as.character(data$NT),
+                 levels = c("<10", "10", "20", "40", ">80"))
+
+###############################################################################
+# Check data consistency
+
+# Assertions
+if (length(unique(single_data$blut_ID)) != nrow(single_data)) {
+  stop("Blood id not unique")
+}
+if (length(unique(single_data$tln_ID)) != nrow(single_data)) {
+  stop("Participant id not unique")
+}
+
+#' Check consistency of reported values according to assumed thresholds
+check_consistency = function(val_cols, res_cols, threshold) {
+  for (j in 1:length(val_cols)) {
+    # Assuming that value and result columns have the same order
+    val_col = val_cols[[j]]
+    res_col = res_cols[[j]]
+    by_value = sum(data[,val_col]>=threshold, na.rm=T)
+    by_cat = sum(data[,res_col] == "Positive", na.rm=T)
+    if (by_value != by_cat) {
+      stop(paste("Mismatch positives (exp./act.)", by_value, by_cat))
+    }
+    by_value = sum(data[,val_col]<threshold, na.rm=T)
+    by_cat = sum(data[,res_col] == "Negative", na.rm=T)
+    if (by_value != by_cat) {
+      stop(paste("Mismatch negatives (exp./act.)", by_value, by_cat))
+    }
+  }
+}
+
+#  Roche
+val_cols = grep("roche_COI", colnames(data), value=T)
+res_cols = grep("roche_Interpretation", colnames(data), value=T)
+check_consistency(val_cols, res_cols, 1.0)
+if (any(data[,val_cols]==0, na.rm=T)) {
+  stop("There are Roche zero values.")
+}
+
+#  Euroimmun
+val_cols = grep("eur_quotient", colnames(data), value=T)
+res_cols = grep("eur_der_test_result", colnames(data), value=T)
+check_consistency(val_cols, res_cols, 1.1)
+if (any(data[,val_cols]==0, na.rm=T)) {
+  stop("There are Euroimmun zero values.")
+}
+
+# Use corrected data frame
+single_data = data
+
+###############################################################################
+# Some statistics
+cat("# rows:", nrow(single_data), "\n")
+cat("# columns:", ncol(single_data), "\n")
+cat("# Ground truths:", sum(!is.na(single_data$model_outcome)),
+    sum(single_data$`Ground truth`!="Unknown"), "\n")
+cat("# True-positive:", sum(single_data$`Ground truth`=="True-positive"), "\n")
+cat("# True-negative:", sum(single_data$`Ground truth`=="True-negative"), "\n")
+
+# Tidy up
+rm(data, val_cols, res_cols, val_col, res_col, j)
+```
+
+# Spaghetti main
+
+```{r, fig.width=5, fig.height=3}
+data = extract_last_values(single_data)
+
+data_long = data %>% tidyr::gather(Array, Concentration, columns$main)
+data_long$Concentration = as.numeric(data_long$Concentration)
+# For plotting, we need the array IDs as numbers
+for (i in 1:length(columns$main)) {
+  data_long[data_long$Array==columns$main[i] &
+            !is.na(data_long$Array),"Array_i"] = as.character(i)
+}
+# Cutoffs
+for (col in columns$main) {
+  data_long[data_long$Array==col,"Old_cutoff"] = cutoff$old[col]
+  data_long[data_long$Array==col,"New_cutoff"] = cutoff$new[col]
+}
+
+# German
+data_long  = data_long %>% dplyr::rename(
+  "Korrekte Klassifikation"="Ground truth")
+data_long$`Korrekte Klassifikation` = as.character(data_long$`Korrekte Klassifikation`)
+data_long[data_long=="Unknown"] = "Unbekannt"
+data_long[data_long=="True-negative"] = "Negativ"
+data_long[data_long=="True-positive"] = "Positiv"
+data_long$`Korrekte Klassifikation` = factor(
+  data_long$`Korrekte Klassifikation`, levels=c("Unbekannt", "Negativ", "Positiv"))
+
+plt_spaghetti_main = ggplot(data=data_long,
+                            aes(y=Concentration, x=Array_i, group=tln_ID,
+                                color=`Korrekte Klassifikation`)) +
+  geom_line(alpha = 0.07) + geom_point(alpha = 0.5) +
+  # Horizontal lines for decision thresholds
+  geom_segment(data=data_long[!duplicated(data_long["Array_i"]),],
+               color=style$thr_lc_old,
+               aes(x=as.numeric(Array_i)-0.5, y=as.numeric(Old_cutoff),
+                   xend=as.numeric(Array_i)+0.5, yend=as.numeric(Old_cutoff),
+                   linetype="Hersteller")) +
+  geom_segment(data=data_long[!duplicated(data_long["Array_i"]),],
+               color=style$thr_lc_new,
+               aes(x=as.numeric(Array_i)-0.5, y=as.numeric(New_cutoff),
+                   xend=as.numeric(Array_i)+0.5, yend=as.numeric(New_cutoff),
+                   linetype="Optimiert")) +
+  scale_linetype_manual(
+    name="Schwellenwert", values=c(style$thr_lt_old,style$thr_lt_new)) +
+  # Decoration
+  scale_x_discrete(labels=columns_pretty$main) + scale_y_log10() +
+  scale_fill_manual(values=style$pal3) +
+  scale_color_manual(values=style$pal3) +
+  labs(x="", y="Messwert")
+plt_spaghetti_main
+```
+
+
+# Ro-N-Ig vs EI-S1-IgG
+
+```{r, fig.width=7, fig.height=4}
+load(here_r("Abbildung-5.RData"))
+plot_grid(
+  roche.igg, get_legend(plt_spaghetti_main),
+  nrow=1, rel_widths = c(3, 1)
+)
+ggsave(here_out("scatter_roche_igg.png"), width=7, height=4, dpi=720)
+ggsave(here_out("scatter_roche_igg.pdf"), width=7, height=4, dpi=720)
+```
+
+
+
+# NT and cPass
+
+```{r, fig.width=5, fig.height=3}
+data = single_data
+
+# Get recovery rates
+data_cts = to_numeric(data)
+cols = c("cPass", "NT")
+rec_old = get_recovery_rates(
+  data_cts, cols, cutoffs=cutoff$old, cutoff_label="Old")
+rec_new = get_recovery_rates(
+  data_cts, cols, cutoffs=cutoff$new, cutoff_label="New")
+rownames(rec_old) = rec_old$Method
+rownames(rec_new) = rec_new$Method
+
+# cPass
+
+# German
+data  = data %>% dplyr::rename(
+  "Korrekte Klassifikation"="Ground truth")
+data$`Korrekte Klassifikation` = as.character(data$`Korrekte Klassifikation`)
+data[data=="Unknown"] = "Unbekannt"
+data[data=="True-negative"] = "Negativ"
+data[data=="True-positive"] = "Positiv"
+data$`Korrekte Klassifikation` = factor(
+  data$`Korrekte Klassifikation`, levels=c("Unbekannt", "Negativ", "Positiv"))
+
+plt_cpass = ggplot(data,
+                   aes(x=cPass, fill=`Korrekte Klassifikation`, color=`Korrekte Klassifikation`)) +
+  geom_histogram(alpha=0.5, position="stack") +  
+  # Thresholds
+  geom_vline(aes(xintercept=cutoff$old$cPass, linetype="Hersteller"),
+             color=style$thr_lc_old) +
+  geom_vline(aes(xintercept=cutoff$new$cPass, linetype="Optimiert"),
+             color=style$thr_lc_new) +
+  #  Use linetype aesthetic to create a separate legend
+  scale_linetype_manual(
+    name="Schwellenwert", values=c(style$thr_lt_old,style$thr_lt_new)) +
+  annotate("text", size=3, color=style$col_truepos, hjust="center",
+            x=cutoff$old$cPass + 10, y=35,
+           label=sprintf("%.0f%%", rec_new["cPass", "frac_pos_rec"] * 100)) +
+  annotate("text", size=3, color=style$col_trueneg, hjust="center",
+            x=cutoff$old$cPass - 30, y=35,
+           label=sprintf("%.0f%%", rec_new["cPass", "frac_neg_rec"] * 100)) +
+  annotate("text", size=3, color=style$col_truepos, hjust="center",
+            x=cutoff$old$cPass + 10, y=30,
+           label=sprintf("(%.0f%%)", rec_old["cPass", "frac_pos_rec"] * 100)) +
+  annotate("text", size=3, color=style$col_trueneg, hjust="center",
+            x=cutoff$old$cPass - 30, y=30,
+           label=sprintf("(%.0f%%)", rec_old["cPass", "frac_neg_rec"] * 100)) +
+  labs(x=paste0(
+    columns_pretty$cpass,
+    " (n=", sum(!is.na(data$cPass)), ")"), y="Anzahl") +
+  scale_fill_manual(values=style$pal3) + scale_color_manual(values=style$pal3)
+plt_cpass
+
+rm(data, data_cts, rec_old, rec_new, cols)
+```
+
+CAPTION: Distribution of measurement values for NT and cPass. The dashed lines indicate the respective manufacturer test decision thresholds. Coloring as in Figure TODO.
+
+```{r}
+data = to_numeric(single_data)
+cols = c("NT", "cPass")
+rbind(get_recovery_rates(data, cols, cutoffs=cutoff$old, cutoff_label="Old"),
+      get_recovery_rates(data, cols, cutoffs=cutoff$new, cutoff_label="New"))
+
+rm(data, cols)
+```
+
+
+
+## Line blot
+
+```{r, fig.height=3, fig.width=5}
+
+jitter_violin_plot_de = function(data_long, cols_pretty,
+                              ylimits, ybreaks, ylabels,
+                              ymeas, thr_shift=0.1, violin_width=0.7,
+                              show_new_line=T, show_new_percent=T,
+                              show_old_line=T, show_old_percent=T,
+                              unknown_text_offset=2.5) {
+  # Size of in-figure texts
+  text_size=3
+  # Base plot
+  plt = ggplot(data_long, aes(x=Array_i, y=Concentration)) +
+    # Jittered points to the left
+    #  We plot these first as violins are not plotted with <=2 points,
+    #  messing up color assignment
+    geom_point(aes(x=as.numeric(Array_i)-0.22, y=Concentration,
+                   col=`Korrekte Klassifikation`, fill=`Korrekte Klassifikation`), size=1,
+               position=position_jitter(width=.15), alpha=0.5, show.legend=F) +
+    # 3 Violins to the right for the ground truth values, and unknowns
+    geom_flat_violin(aes(fill=`Korrekte Klassifikation`, col=`Korrekte Klassifikation`),
+                     position = position_nudge(x = .0, y = 0),
+                     alpha=0.2, trim=F, scale="area", width=violin_width) +
+    # Labels, scales, colors
+    scale_y_log10(limits=ylimits, breaks=ybreaks, labels=ylabels) +
+    scale_x_discrete(labels=paste(cols_pretty)) +
+    scale_fill_manual(values=style$pal3) + scale_color_manual(values=style$pal3) + 
+    # Add measurement count
+    geom_text(data=data_long[!duplicated(data_long["Array_i"]),], size=3,
+              aes(x=Array_i, y=ymeas, label=Count)) + 
+    labs(x="", y="Messwert")
+  
+  linetype_manuals = c()
+
+  # New annotations
+  if (show_new_line) {
+    #  Horizontal line
+    plt = plt +
+      geom_segment(data=data_long[!duplicated(data_long["Array_i"]),],
+                   color=style$thr_lc_new,
+                   aes(x=as.numeric(Array_i)-0.5, y=as.numeric(New_cutoff),
+                       xend=as.numeric(Array_i)+0.5,
+                       yend=as.numeric(New_cutoff), linetype="Optimiert"))
+    linetype_manuals = c(linetype_manuals, style$thr_lt_new)
+  }
+  if (show_new_percent) {
+    #  Percentages
+    plt = plt +
+      geom_text(
+        data=data_long[!duplicated(data_long["Array_i"]),],
+        size=text_size, color=style$col_grey, hjust="right",
+        aes(x=as.numeric(Array_i) + 0.5,
+            y=as.numeric(New_cutoff)*10**(thr_shift*unknown_text_offset),
+            label=`Fraction unknown positive new`)) +
+      geom_text(
+        data=data_long[!duplicated(data_long["Array_i"]),],
+        size=text_size, color=style$col_truepos, hjust="right",
+        aes(x=as.numeric(Array_i) + 0.5,
+            y=as.numeric(New_cutoff)*10**thr_shift,
+            label=`Fraction true positive new`)) + 
+      geom_text(
+        data=data_long[!duplicated(data_long["Array_i"]),],
+        size=text_size, color=style$col_trueneg, hjust="right",
+        aes(x=as.numeric(Array_i) + 0.5,
+            y=as.numeric(New_cutoff)*10**-thr_shift,
+            label=`Fraction true negative new`))
+  }
+
+  # Old annotations
+  if (show_old_line) {
+    # Horizontal line
+    plt = plt +
+      geom_segment(data=data_long[!duplicated(data_long["Array_i"]),],
+                   color=style$thr_lc_old,
+                   aes(x=as.numeric(Array_i)-0.5, y=as.numeric(Old_cutoff),
+                       xend=as.numeric(Array_i)+0.5,
+                       yend=as.numeric(Old_cutoff), linetype="Hersteller"))
+    linetype_manuals = c(style$thr_lt_old, linetype_manuals)
+  }
+  if (show_old_percent) {
+    #  Percentages
+    plt = plt + 
+      geom_text(
+        data=data_long[!duplicated(data_long["Array_i"]),],
+        size=text_size, color=style$col_grey, hjust="right",
+        aes(x=as.numeric(Array_i) + 0.5,
+            y=as.numeric(Old_cutoff)*10**(thr_shift*unknown_text_offset),
+            label=`Fraction unknown positive old`)) +
+      geom_text(
+        data=data_long[!duplicated(data_long["Array_i"]),],
+        size=text_size, color=style$col_truepos, hjust="right",
+        aes(x=as.numeric(Array_i) + 0.5,
+            y=as.numeric(Old_cutoff)*10**thr_shift,
+            label=`Fraction true positive old`)) + 
+      geom_text(
+        data=data_long[!duplicated(data_long["Array_i"]),],
+        size=text_size, color=style$col_trueneg, hjust="right",
+        aes(x=as.numeric(Array_i) + 0.5,
+            y=as.numeric(Old_cutoff)*10**-thr_shift,
+            label=`Fraction true negative old`))
+  }
+
+  # Linetype annotation
+  plt = plt + scale_linetype_manual(name="Schwellenwert", values=linetype_manuals)
+
+  plt
+}
+
+cols = columns$lineblot
+cols_pretty = columns_pretty$lineblot
+
+data = data_long_for_viola(
+  single_data, cols, cols_pretty, "not_reactive", cutoff)
+data_long = data[[1]]
+data_long_inv = data[[2]]
+
+# German
+data_long  = data_long %>% dplyr::rename(
+  "Korrekte Klassifikation"="Ground truth")
+data_long$`Korrekte Klassifikation` = as.character(data_long$`Korrekte Klassifikation`)
+data_long[data_long=="Unknown"] = "Unbekannt"
+data_long[data_long=="True-negative"] = "Negativ"
+data_long[data_long=="True-positive"] = "Positiv"
+data_long$`Korrekte Klassifikation` = factor(
+  data_long$`Korrekte Klassifikation`, levels=c("Unbekannt", "Negativ", "Positiv"))
+
+# Violin plots and jitter for the continuous part
+plt_up = jitter_violin_plot_de(
+  data_long, cols_pretty=cols_pretty,
+  ylimits=c(0.3,30), ybreaks=c(0.4,1,3,10),
+  ylabels=c("<1","1","3","10"),
+  ymeas=30, thr_shift=0.07, violin_width=0.7,
+  show_old_percent = F)
+plt_up
+
+# Histogram for the discrete part
+plt_down = discrete_bar_plot(data_long_inv, ylimits=c(0,170))
+plt_down
+
+# Combine plots
+plt_lineblot_distr = plt_up + annotation_custom(
+  ggplotGrob(plt_down + theme(legend.position = "none")),
+  ymin=-0.65, ymax=-0.15, xmin=0.3, xmax=3.7)
+plt_lineblot_distr
+
+# Save plot
+for (fmt in style$output_formats) {
+  #ggsave(here_out(paste0("LineBlot_Distribution.", fmt)),
+  #       device=fmt, dpi=style$dpi, width=5, height=5, units="in")
+}
+
+rm(data, data_long, data_long_inv, cols, cols_pretty, plt_up, plt_down, fmt)
+```
+
+```{r, fig.width=8, fig.height=3}
+plot_grid(
+  title_plot("A", plt_lineblot_distr + theme(legend.position = "none")),
+  title_plot("B", plt_cpass + theme(legend.position = "none")),
+  cowplot::get_legend(plt_cpass),
+  nrow=1, rel_widths = c(3,3,1.5)
+)
+ggsave(here_out("mg_cpass.png"), width=8, height=3, dpi=720)
+ggsave(here_out("mg_cpass.pdf"), width=8, height=3, dpi=720)
+```
+
