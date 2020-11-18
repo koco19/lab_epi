@@ -8,12 +8,10 @@ rm(list = ls())
 here_weights = function(...) here::here("SamplingWeights", ...)
 
 
-# if (!exists("KoCo_BLab")) {                                         # since we have the rm(list = ls()) command, this if clause is useless. KoCo_BLab_split will never exist
-  source(here_weights("Sampling_weights_study_pop.R"))
-#}
+source(here_weights("Sampling_weights_study_pop.R"))
 
-here_statistics = function(...) here::here("Statistics", ...)
-here_data = function(...) here_statistics("Data", ...)
+
+here_koco_data = function (...) here::here("KoCo19_Datasets", ...)
 here_algo_results = function (...) here::here("AlgorithmResults", ...)
 here_weights = function(...) here::here("SamplingWeights", ...)
 
@@ -33,7 +31,7 @@ library(sampling)
 ###
 
 # We need this data set to identify households with or without children
-KoCo19 <- read.csv(here_data("ind_lab_baseline_new.csv"), stringsAsFactors = F)
+KoCo19 <- read.csv(here_koco_data("Analysis Data Sets/ind_lab_baseline_new.csv"), stringsAsFactors = F)
 
 
 # We have 134 missing ages in this data set. We consider that:
@@ -52,7 +50,7 @@ KoCo19$Age[is.na(KoCo19$Age) & KoCo19$obs_hh_members > 2] <- 10
 ###
 
 # reading the data set with with the consituencies info for each household
-Const <- read.csv(here_data("KoCo19_Haushalte4Modeler_wRRstartConstituency_20200910.csv"), stringsAsFactors = TRUE)
+Const <- read.csv(here_koco_data("Analysis Data Sets/KoCo19_Haushalte4Modeler_wRRstartConstituency_20200910.csv"), stringsAsFactors = TRUE)
 # 3007 hh
 
 # Remove some hh that are not in the final study population
@@ -78,7 +76,7 @@ Const <- Const[, c("hht_ID", "const_start")]
 
 ### Sex/Age distribution
 
-margins_age_sex <- read.csv(here_data("muc_age_structure_KoCo_bis_study_pop.csv"), stringsAsFactors = F)
+margins_age_sex <- read.csv(here_koco_data("Analysis Data Sets/muc_age_structure_KoCo_bis_study_pop.csv"), stringsAsFactors = F)
 
 # Rename variables to match the included information 
 names(margins_age_sex)[names(margins_age_sex)=="Group.1"] <- "age_cat"
@@ -96,7 +94,7 @@ margins_age_sex$sex_age <- paste(margins_age_sex$Sex, margins_age_sex$age_cat,
 ### Number of households per constituency
 
 # Information about number of hh in Munich depending on constituency based on stat.Amt
-Munich_hh <- read.csv(here_data("muc_hh_structure_KoCo_bis.csv"), stringsAsFactors = TRUE)
+Munich_hh <- read.csv(here_koco_data("Analysis Data Sets/muc_hh_structure_KoCo_bis.csv"), stringsAsFactors = TRUE)
 
 # Recoding of the IDs of the constituencies
 Munich_hh$const <- as.character(Munich_hh$Const_ID)
@@ -324,7 +322,6 @@ data_house <- merge(data_house, unique(KoCo_BLab[, c("hh_id", "obs_hh_members")]
 
 
 # Adding information about type of housing (single vs. multi)
-# TODO y: Is it right to use obs_hh_members here? As those are not the real household sizes.
 data_house$house <- cut(data_house$obs_hh_members, breaks = c(0, 1, 100),
                         labels = c("single", "multi"))
 
@@ -390,7 +387,7 @@ w_hh_cal_lin <- g * d_house
 # Checking if calibrated weights sum up to auxiliary data
 sum(t(w_hh_cal_lin) %*% as.matrix(data_house) - totals[])
 summary(w_hh_cal_lin)
-# Negative and big weigths -> We do not retain the linear method
+# Negative and big weights -> We do not retain the linear method
 
 
 ### method "raking"
@@ -400,27 +397,20 @@ w_hh_cal_rak <- g * d_house
 # Checking if calibrated weights sum up to auxiliary data
 sum(t(w_hh_cal_rak) %*% as.matrix(data_house) - totals[])
 summary(w_hh_cal_rak)
-# Very big weigths -> We do not retain the raking ratio method
+# Very big weights -> We do not retain the raking ratio method
 
 
 ### method "truncated"
 g_trunc <- calib(data_house, d = d_house, totals, method = "truncated",
            bounds = c(0.2, 4), max_iter = 2000)
 # Not converging...
-w_hh_cal_trunc <- g_trunc * d_house
-
-# Checking if calibrated weights sum up to auxiliary data
-# sum(t(w_hh_cal_trunc) %*% as.matrix(data_house) - totals[])
-# summary(w_hh_cal_trunc)
-# plot(density(g_trunc))
-
 
 
 ### method "logit"
 g_logit <- calib(data_house, d = d_house, totals, method="logit",
            bounds=c(0.3,3.01), max_iter = 2000)  
 w_hh_cal_logit <- g_logit * d_house
-summary(d_house)
+
 # Checking if calibrated weights sum up to auxiliary data
 sum(t(w_hh_cal_logit) %*% as.matrix(data_house) - totals[])
 summary(w_hh_cal_logit)
@@ -461,13 +451,6 @@ d_house <- d_house[rownames(data_house)]
 g_trunc <- calib(data_house_igg, d = d_house, totals, method = "truncated",
                  bounds = c(0.2, 4), max_iter = 1000)
 # Not converging...
-w_hh_cal_trunc <- g_trunc * d_house
-
-# Checking if calibrated weights sum up to auxiliary data
-# sum(t(w_hh_cal_trunc) %*% as.matrix(data_house) - totals[])
-# summary(w_hh_cal_trunc)
-# plot(density(g_trunc))
-# Ok
 
 
 ### method "logit"
@@ -507,37 +490,6 @@ freq(x = KoCo_BLab$IgG_result, w = KoCo_BLab$w_ind_cal_igg, plot=F)
 freq(x = KoCo_BLab$R_Result, plot=F)
 freq(x = KoCo_BLab$R_Result, w = KoCo_BLab$w_ind_samp, plot=F)
 freq(x = KoCo_BLab$R_Result, w = KoCo_BLab$w_ind_cal, plot=F)
-
-
-# Estimation of the proportion by age group
-age <- split(KoCo_BLab, KoCo_BLab$age_cat)
-sapply(age, function(z){
-  round(freq(z[, "R_Result"], plot = F)[2, 2], 2)
-})
-
-sapply(age, function(z){
-  round(freq(z[, "R_Result"], w = z[, "w_ind_samp"], plot = F)[2, 2], 2)
-})
-
-sapply(age, function(z){
-  round(freq(z[, "R_Result"], w = z[, "w_ind_cal"], plot = F)[2, 2], 2)
-})
-
-
-# Estimation of the proportion by sex
-sex <- split(KoCo_BLab, KoCo_BLab$Sex)
-sapply(sex, function(z){
-  round(freq(z[, "R_Result"], plot = F)[2, 2], 2)
-})
-
-sapply(sex, function(z){
-  round(freq(z[, "R_Result"], w = z[, "w_ind_samp"], plot = F)[2, 2], 2)
-})
-
-sapply(sex, function(z){
-  round(freq(z[, "R_Result"], w = z[, "w_ind_cal"], plot = F)[2, 2], 2)
-})
-
 
 
 
@@ -582,11 +534,11 @@ KoCo_Weights <- KoCo_Weights[, c("hh_id", "ind_id", "Age", "Sex", "Birth_Country
                                  "w_hh_samp", "w_ind_samp","w_hh_samp_igg", "w_ind_samp_igg")]
 
 ### Export table
-write.csv(KoCo_Weights, here_data("KoCo_weigths.csv"), row.names = FALSE)
+write.csv(KoCo_Weights, here_koco_data("Analysis Data Sets/KoCo_weigths.csv"), row.names = FALSE)
 
 
 # Removing temporary data
-rm(list = setdiff(ls(), c("here_weights", "here_statistics", "here_algo_results", "KoCo_BLab", "data_house", "Const", "Munich_hh")))
+rm(list = setdiff(ls(), c("here_weights", "here_koco_data", "here_algo_results", "KoCo_BLab", "data_house", "Const", "Munich_hh")))
 
 
 #############################

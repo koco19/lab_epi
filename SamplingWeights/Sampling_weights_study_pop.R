@@ -7,12 +7,10 @@
 
 rm(list = ls())
 
-here_statistics = (function(...) here::here("Statistics", ...))
-here_data = (function(...) here_statistics("Data", ...))
+here_koco_data = function (...) here::here("KoCo19_Datasets", ...)
 here_algo_results = function (...) here::here("AlgorithmResults", ...)
 here_weights = function(...) here::here("SamplingWeights", ...)
 
-# NOTE: Before running this script, it is important to check for true duplicates!
 
 library(descr)
 library(randomForest)
@@ -27,7 +25,7 @@ library(e1071)
 ###
 
 # Reading the lab data set
-KoCo_BLab <- read.csv(here_data("Koco_baseline.csv"), stringsAsFactors = TRUE)
+KoCo_BLab <- read.csv(here_koco_data("Analysis Data Sets/Koco_baseline.csv"), stringsAsFactors = TRUE)
 
 # Cutoffs
 cutoffs <- readRDS(here_algo_results("cutoffs.RData"))
@@ -74,7 +72,7 @@ KoCo_BLab <- KoCo_BLab[, c("ind_id", "hh_id", "Age", "Sex", "Birth_Country.x",
                            "R_Result_manu_cutoff", "IgA_result_manu_cutoff", "IgG_result_manu_cutoff")]
 
 # We need this other data set to calculate the number of ppl in the study population (age >= 14) in each hh
-KoCo19 <- read.csv(here_data("ind_lab_baseline_new.csv"), stringsAsFactors = F)
+KoCo19 <- read.csv(here_koco_data("Analysis Data Sets/ind_lab_baseline_new.csv"), stringsAsFactors = F)
 
 # We have 134 missing ages in this data set. We consider that:
 # - in households with 2 members, the missing age is another adult (age >= 14)
@@ -105,7 +103,7 @@ KoCo_BLab <- merge(KoCo_BLab, obs_hh_members_study, all.x = TRUE)
 ###
 
 # reading the data set with with the consituencies info for each household
-Const <- read.csv(here_data("KoCo19_Haushalte4Modeler_wRRstartConstituency_20200910.csv"))
+Const <- read.csv(here_koco_data("Analysis Data Sets/KoCo19_Haushalte4Modeler_wRRstartConstituency_20200910.csv"))
 # 3007 hh
 
 # Remove some hh that are not in the final study population
@@ -138,7 +136,7 @@ Const <- Const[, c("hht_ID", "const_end", "const_start")]
 ### Number of households per constituency
 
 # Information about number of hh in Munich depending on constituency based on stat.Amt
-Munich_hh <- read.csv(here_data("muc_hh_structure_KoCo_bis.csv"))
+Munich_hh <- read.csv(here_koco_data("Analysis Data Sets/muc_hh_structure_KoCo_bis.csv"))
 
 # Recoding of the IDs of the constituencies
 Munich_hh$const <- as.character(Munich_hh$Const_ID)
