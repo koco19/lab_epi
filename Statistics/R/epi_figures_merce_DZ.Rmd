@@ -14,7 +14,7 @@ library(ggplot2)
 
 here_r = function (...) here::here("Statistics", "R", ...)
 here_koco = function (...) here::here("KoCo19_Datasets", ...)
-here_epi_out = function (...) here::here("Epi_out", ...)
+here_epi_out = function (...) here::here("Epi_out", "epi_figures_merce_DZ", ...)
 
 # Setup
 source(here_r("setup.R"))
@@ -179,8 +179,8 @@ plot_grid(fig3a, fig3b, fig3c, fig3d,
           labels=c("A", "B", "C", "D"),
           ncol=1, align="v",
           rel_heights = c(0.34, 0.2, 0.2, 0.2))
-ggsave("DZ-Figure-3-horizontal-limit20.pdf", width=8, height=6)
-ggsave("DZ-Figure-3-horizontal-limit20.png", width=8, height=6)
+ggsave(here_epi_out("DZ-Figure-3-horizontal-limit20.pdf"), width=8, height=6)
+ggsave(here_epi_out("DZ-Figure-3-horizontal-limit20.png"), width=8, height=6)
 
 
 ```
@@ -311,8 +311,8 @@ plot_grid(fig3a, fig3b, fig3c, fig3d,
           #          "C) Atemwegsallergien", "D) Verlust von Geruchs-/Geschmackssinn"),
           ncol=1, align="v",
           rel_heights = c(0.34, 0.2, 0.2, 0.2))
-ggsave("DZ-Figure-3-horizontal-limit-default.pdf", width=8, height=6)
-ggsave("DZ-Figure-3-horizontal-limit-default.png", width=8, height=6)
+ggsave(here_epi_out("DZ-Figure-3-horizontal-limit-default.pdf"), width=8, height=6)
+ggsave(here_epi_out("DZ-Figure-3-horizontal-limit-default.png"), width=8, height=6)
 
 ```
 
@@ -415,8 +415,8 @@ plot_grid(top, bottom, nrow=2)
 # plot_grid(fig3a, fig3b, fig3c, fig3d,
 #           labels=c("A", "B", "C", "D"),
 #           ncol=4, rel_widths = c(0.5,0.2,0.2,0.2))
-ggsave("DZ-Figure-3-vertical-limit20.pdf", width=10, height=8)
-ggsave("DZ-Figure-3-vertical-limit20.png", width=10, height=8)
+ggsave(here_epi_out("DZ-Figure-3-vertical-limit20.pdf"), width=10, height=8)
+ggsave(here_epi_out("DZ-Figure-3-vertical-limit20.png"), width=10, height=8)
 
 ```
 
@@ -520,8 +520,8 @@ plot_grid(top, bottom, nrow=2)
 # plot_grid(fig3a, fig3b, fig3c, fig3d,
 #           labels=c("A", "B", "C", "D"),
 #           ncol=4, rel_widths = c(0.5,0.2,0.2,0.2))
-ggsave("DZ-Figure-3-vertical-limit-default.pdf", width=14, height=6)
-ggsave("DZ-Figure-3-vertical-limit-default.png", width=14, height=6)
+ggsave(here_epi_out("DZ-Figure-3-vertical-limit-default.pdf"), width=14, height=6)
+ggsave(here_epi_out("DZ-Figure-3-vertical-limit-default.png"), width=14, height=6)
 
 ```
 

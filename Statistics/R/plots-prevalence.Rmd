@@ -11,6 +11,14 @@ editor_options:
 
 ```{r setup, include=FALSE}
 
+here_r = function (...) here::here("Statistics", "R", ...)
+here_prevalence = function (...) here::here("AlgorithmResults", ...)
+here_epi_out = function (...) here::here("Epi_out", "epi_figures_merce", ...)
+
+# Setup
+source(here_r("setup.R"))
+
+
 library(dplyr)
 library(ggplot2)
 library(tidyr)
@@ -27,20 +35,25 @@ library(Cairo)
 col_grey = "#999999"
 col_trueneg = "#56B4E9" #"#0072B2"
 col_truepos = "#D55E00"
-pal <- c(col_grey, col_trueneg, col_truepos)
+black = "#000000"
+pal <- c(col_grey, col_trueneg, col_truepos, black)
 
 
-d <- read.csv("prevalence_estimates.csv")
+d <- read.csv(here_prevalence("prevalence_estimates.csv"))
 
 head(d)
 str(d)
 
-# For the plot
 
+  
+# For the plot (with black unadjusted)
 plot <- d %>%
+  as_tibble() %>%
   select(Classifier, weighted, spec_sens, 
          Seroprevalence_adjusted, 
-         lower_ci_adjusted, upper_ci_adjusted) %>%
+         lower_ci_adjusted, upper_ci_adjusted,
+         Seroprevalence_unadjusted,
+         lower_ci_unadjusted, upper_ci_unadjusted) %>%
   mutate(weighted = case_when(
     weighted %in% "yes" ~ "Weighted",
     weighted %in% "no" ~ "Unweighted")) %>%
@@ -61,15 +74,163 @@ plot <- d %>%
   mutate(`Specificity/Sensitivity` = spec_sens) %>%
   mutate(Classifier = fct_inorder(Classifier)) %>%
   mutate(Classifier = fct_rev(Classifier)) %>%
-  ggplot(aes(y=Seroprevalence_adjusted*100, 
-             x=Classifier, color=`Specificity/Sensitivity`)) +
+  gather(Parameter, value, -c(Classifier, weighted, `spec_sens`,
+                              `Specificity/Sensitivity`)) %>%
+  mutate(Adjustment = ifelse(Parameter %in% c("Seroprevalence_adjusted",
+                                              "lower_ci_adjusted",
+                                              "upper_ci_adjusted"), "Adjusted", "Unadjusted")) %>%
+  mutate(Parameter = ifelse(Parameter %in% c("Seroprevalence_adjusted", "Seroprevalence_unadjusted"), "Seroprevalence",
+                ifelse(Parameter %in% c("lower_ci_adjusted", "lower_ci_unadjusted"), "lower_ci", "upper_ci"))) %>%
+  spread(Parameter, value) %>%
+  select(-spec_sens) %>%
+  mutate(`Specificity/Sensitivity` = ifelse(Adjustment == "Unadjusted", 
+                                            "Unadjusted for spec./sens.",
+                                            `Specificity/Sensitivity`)) %>%
+  select(-Adjustment) %>%
+  unique() %>%
+  mutate(order.Classifier = as.numeric(as.factor(Classifier)),
+         reorder.Classifier = case_when(
+           order.Classifier == 1 ~ 1,
+           order.Classifier == 2 ~ 3,
+           order.Classifier == 3 ~ 4,
+           order.Classifier == 4 ~ 2,
+           order.Classifier == 5 ~ 5,
+           order.Classifier == 6 ~ 6,
+           order.Classifier == 7 ~ 7,
+           order.Classifier == 8 ~ 8),
+         Classifier = fct_reorder(Classifier, reorder.Classifier)) %>%
+  ggplot(aes(y=Seroprevalence*100, 
+             x=Classifier, 
+             color=`Specificity/Sensitivity`)) +
   geom_point(position=position_dodge(width=0.5)) +
-  geom_linerange(aes(ymin=lower_ci_adjusted*100,
-                     ymax=upper_ci_adjusted*100), 
+  geom_linerange(aes(ymin=lower_ci*100,
+                     ymax=upper_ci*100), 
                  position=position_dodge(width=0.5)) +
   coord_flip() +
+  scale_linetype_manual(values=c(1,6)) +
+  scale_color_manual(values=pal[c(3,2,1,4)]) +
+  xlab("") + ylab("Seroprevalence (%)") +
+  theme_bw() +
+  facet_wrap(~weighted)
+plot
+
+ggsave(here_epi_out(file="Epi-Fig-S3.pdf"), 
+       device=cairo_pdf,
+       width=10, height=6)
+
+ggsave(here_epi_out(file="Epi-Fig-S3.png"), 
+       width=10, height=6)
+
+# For the table
+table <- d %>%
+  filter(weighted %in% "yes") %>%
+  select(Classifier, Cut.off, Our.specificity,
+         Our.sensitivity,
+         Manufacturer.s.specificity,
+         Manufacturer.s.sensitivity..low.,
+         Manufacturer.s.sensitivity..high.) %>%
+  rename(`Specificity\nOptimised` = Our.specificity,
+         `Sensitivity\nOptimised` = Our.sensitivity,
+         `Specificity\nManufacturer` = Manufacturer.s.specificity,
+         `Sensitivity\nManufacturer (low)` = Manufacturer.s.sensitivity..low.,
+         `Sensitivity\nManufacturer (high)` = Manufacturer.s.sensitivity..high.) %>%
+  mutate(Classifier = case_when(
+    Classifier %in% "EI-S1-IgA manufacturer's cut-off" ~ "EI-S1-IgA \n(Manufacturer's cut-off)",
+    Classifier %in% "EI-S1-IgA optimized cut-off" ~ "EI-S1-IgA \n(Optimised cut-off)",
+        Classifier %in% "EI-S1-IgG manufacturer's cut-off" ~ "EI-S1-IgG \n(Manufacturer's cut-off)",
+    Classifier %in% "EI-S1-IgG optimized cut-off" ~ "EI-S1-IgG \n(Optimised cut-off)",    
+    Classifier %in% "Ro-N-Ig manufacturer's cut-off" ~ "Ro-N-Ig \n(Manufacturer's cut-off)",
+    Classifier %in% "Ro-N-Ig optimized cut-off" ~ "Ro-N-Ig \n(Optimised cut-off)",
+    Classifier %in% "Random Forest" ~ "Random Forest",
+    Classifier %in% "Support Vector Machine" ~ "Support Vector Machine")) %>%
+  mutate(Classifier = fct_inorder(Classifier)) %>%
+  unique() %>%
+  gather(parameter, value, -Classifier, -Cut.off) %>%
+  filter(!is.na(value)) %>%
+  mutate(value = signif(value, digits=3)) %>%
+  mutate(value = as.character(value)) %>%
+  mutate(value = ifelse(value=="1", "1.000", value)) %>%
+  spread(parameter, value) %>%
+  gather(parameter, value, -Classifier, -Cut.off) %>%
+  mutate(value = ifelse(is.na(value), "", value)) %>%
+         spread(parameter, value) %>%
+  rename(`Cut-off` = Cut.off) %>%
+  mutate(`Cut-off` = signif(`Cut-off`, digits=3)) %>%
+  mutate(`Cut-off` = as.character(`Cut-off`)) %>%
+  mutate(`Cut-off` = ifelse(is.na(`Cut-off`), "",
+                            ifelse(`Cut-off` == "1.1", "1.100",
+                                   ifelse(`Cut-off` == "1.08", "1.080", ifelse(`Cut-off` == "1.01", "1.010", ifelse(`Cut-off` == "1", "1.000", `Cut-off`)))))) %>%
+  mutate(`Specificity\nOptimised` = ifelse(`Specificity\nOptimised` == "0.98", "0.980", `Specificity\nOptimised`)) %>%
+  dplyr::select(Classifier, `Cut-off`, `Specificity\nManufacturer`,
+                `Specificity\nOptimised`, `Sensitivity\nManufacturer (low)`, `Sensitivity\nManufacturer (high)`,            `Sensitivity\nOptimised`)  
+table
+  
+my.table <- tableGrob(table, theme=ttheme_default(base_size=9),
+                      rows=NULL)
+plot.table <- grid.arrange(plot, my.table, ncol=1)
+plot.table
+
+
+plot_grid(plot, my.table, ncol=1, rel_heights = c(3.5/6, 2.5/6))
+
+# Save plot+table in pdf and png
+ggsave(here_epi_out(file="Epi-Fig-S3.pdf"), 
+       device=cairo_pdf,
+       width=11, height=10)
+
+ggsave(here_epi_out(file="Epi-Fig-S3.png"), 
+       width=10, height=10)
+
+
+######## Previous layout
+
+# For the plot
+plot <- d %>%
+  select(Classifier, weighted, spec_sens, 
+         Seroprevalence_adjusted, 
+         lower_ci_adjusted, upper_ci_adjusted,
+         Seroprevalence_unadjusted,
+         lower_ci_unadjusted, upper_ci_unadjusted) %>%
+  mutate(weighted = case_when(
+    weighted %in% "yes" ~ "Weighted",
+    weighted %in% "no" ~ "Unweighted")) %>%
+  mutate(weighted = fct_inorder(weighted)) %>%
+  mutate(spec_sens = case_when(
+    spec_sens %in% "Manufacturer's sensitivity (high)" ~ "Manufacturer (high sensitivity)",
+    spec_sens %in% "Manufacturer's sensitivity (low)" ~ "Manufacturer (low sensitivity)",
+    spec_sens %in% "Own" ~ "Optimised")) %>%
+  mutate(Classifier = case_when(
+    Classifier %in% "EI-S1-IgA manufacturer's cut-off" ~ "EI-S1-IgA \n(Manufacturer's cut-off)",
+    Classifier %in% "EI-S1-IgA optimized cut-off" ~ "EI-S1-IgA \n(Optimised cut-off)",
+        Classifier %in% "EI-S1-IgG manufacturer's cut-off" ~ "EI-S1-IgG \n(Manufacturer's cut-off)",
+    Classifier %in% "EI-S1-IgG optimized cut-off" ~ "EI-S1-IgG \n(Optimised cut-off)",    
+    Classifier %in% "Ro-N-Ig manufacturer's cut-off" ~ "Ro-N-Ig \n(Manufacturer's cut-off)",
+    Classifier %in% "Ro-N-Ig optimized cut-off" ~ "Ro-N-Ig \n(Optimised cut-off)",
+    Classifier %in% "Random Forest" ~ "Random Forest",
+    Classifier %in% "Support Vector Machine" ~ "Support Vector Machine")) %>%
+  mutate(`Specificity/Sensitivity` = spec_sens) %>%
+  mutate(Classifier = fct_inorder(Classifier)) %>%
+  mutate(Classifier = fct_rev(Classifier)) %>%
+  gather(Parameter, value, -c(Classifier, weighted, `spec_sens`,
+                              `Specificity/Sensitivity`)) %>%
+  mutate(Adjustment = ifelse(Parameter %in% c("Seroprevalence_adjusted",
+                                              "lower_ci_adjusted",
+                                              "upper_ci_adjusted"), "Adjusted", "Unadjusted")) %>%
+  mutate(Parameter = ifelse(Parameter %in% c("Seroprevalence_adjusted", "Seroprevalence_unadjusted"), "Seroprevalence",
+                ifelse(Parameter %in% c("lower_ci_adjusted", "lower_ci_unadjusted"), "lower_ci", "upper_ci"))) %>%
+  spread(Parameter, value) %>%
+  ggplot(aes(y=Seroprevalence*100, 
+             x=Classifier, shape=Adjustment,
+             linetype=Adjustment,
+             color=`Specificity/Sensitivity`)) +
+  geom_point(position=position_dodge(width=0.5)) +
+  geom_linerange(aes(ymin=lower_ci*100,
+                     ymax=upper_ci*100), 
+                 position=position_dodge(width=0.5)) +
+  coord_flip() +
+  scale_linetype_manual(values=c(1,6)) +
   scale_color_manual(values=pal[c(3,2,1)]) +
-  xlab("") + ylab("Adjusted seroprevalence (%)") +
+  xlab("") + ylab("Seroprevalence (%)") +
   theme_bw() +
   facet_wrap(~weighted)
 plot
@@ -113,6 +274,7 @@ table <- d %>%
   mutate(`Cut-off` = ifelse(is.na(`Cut-off`), "",
                             ifelse(`Cut-off` == "1.1", "1.100",
                                    ifelse(`Cut-off` == "1.08", "1.080", ifelse(`Cut-off` == "1.01", "1.010", ifelse(`Cut-off` == "1", "1.000", `Cut-off`)))))) %>%
+  mutate(`Specificity\nOptimised` = ifelse(`Specificity\nOptimised` == "0.98", "0.980", `Specificity\nOptimised`)) %>%
   dplyr::select(Classifier, `Cut-off`, `Specificity\nManufacturer`,
                 `Specificity\nOptimised`, `Sensitivity\nManufacturer (low)`, `Sensitivity\nManufacturer (high)`,            `Sensitivity\nOptimised`) 
 table
@@ -123,15 +285,17 @@ plot.table <- grid.arrange(plot, my.table, ncol=1)
 plot.table
 
 
-plot_grid(plot, my.table, ncol=1, rel_heights = c(3/6, 3/6))
+plot_grid(plot, my.table, ncol=1, rel_heights = c(3.5/6, 2.5/6))
 
 # Save plot+table in pdf and png
-ggsave(file="Epi-SI-Prevalence-plot-table.pdf", 
-       device=cairo_pdf,
-       width=10, height=8)
+# ggsave(file="Epi-Fig-S3-alternative.pdf", 
+#        device=cairo_pdf,
+#        width=11, height=10)
+# 
+# ggsave(file="Epi-Fig-S3-alternative.png", 
+#        width=10, height=10)
+# 
 
-ggsave(file="Epi-SI-Prevalence-plot-table.png", 
-       width=10, height=8)
 
 
 ```

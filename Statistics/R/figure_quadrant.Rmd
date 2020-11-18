@@ -17,9 +17,7 @@ Compilation date: `r format(Sys.time(), '%d.%m.%Y')`
 ```{r}
 here_r = function (...) here::here("Statistics", "R", ...)
 here_lab_data = function (...) here::here("Lab_paper2_data", ...)
-here_out = function (...) here::here("Lab_paper2_output", "figure_quadrant", ...)
-
-dir.create(here_out(), showWarnings = FALSE)
+here_lab_output = function (...) here::here("Lab_paper2_output", ...)
 
 library(magrittr)
 library(ggplot2)
@@ -29,7 +27,7 @@ source(here_r("setup.R"))
 source(here_r("functions.R"))
 
 library(dplyr)
-source(here_r("RainCloudPlots", "R_rainclouds.R")) 
+source(here_r("R_rainclouds.R"))
 
 
 # Load data
@@ -70,11 +68,11 @@ data = single_data
 #  Add binary ground truth column
 data['Ground truth'] = ifelse(is.na(data$model_outcome), "Unknown", 
                               ifelse(data$model_outcome=="true_positive",
-                                     "True-positive",
-                                     "True-negative"))
+                                     "True positive",
+                                     "True negative"))
 data$`Ground truth` = factor(as.character(data$`Ground truth`),
-                             levels = c("Unknown", "True-negative", 
-                                        "True-positive"))
+                             levels = c("Unknown", "True negative", 
+                                        "True positive"))
 
 # #  NT to categories with correct ordering
 # data$NT = factor(as.character(data$NT), 
@@ -358,39 +356,39 @@ v <- 1
   ylab("Test value") + xlab(v.now) +
     ggtitle(v.now) +
     geom_text(data = filter(counts.now, quadrant == 1 & 
-                              `Ground truth` == "True-positive"),
+                              `Ground truth` == "True positive"),
             aes(x=Inf, y=Inf, label=Percentage),
             hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
     geom_text(data = filter(counts.now, quadrant == 1 & 
-                              `Ground truth` == "True-negative"),
+                              `Ground truth` == "True negative"),
             aes(x=Inf, y=Inf, label=Percentage), 
             hjust=1, vjust=2.15, show.legend=FALSE, size=3.5) +
     geom_text(data = filter(counts.now, quadrant == 2 & 
-                              `Ground truth` == "True-positive"),
+                              `Ground truth` == "True positive"),
             aes(x=0, y=Inf, label=Percentage),
             hjust=-0.1, vjust=1, show.legend=FALSE, size=3.5) +
     geom_text(data = filter(counts.now, quadrant == 2 & 
-                              `Ground truth` == "True-negative"),
+                              `Ground truth` == "True negative"),
             aes(x=0, y=Inf, label=Percentage), 
             hjust=-0.1, vjust=2.3, show.legend=FALSE, size=3.5) +
     geom_text(data = filter(counts.now, quadrant == 3 & 
-                              `Ground truth` == "True-positive"),
+                              `Ground truth` == "True positive"),
             aes(x=0, y=0, label=Percentage),
             hjust=-0.1, vjust=-0.1, show.legend=FALSE, size=3.5) +
     geom_text(data = filter(counts.now, quadrant == 3 & 
-                              `Ground truth` == "True-negative"),
+                              `Ground truth` == "True negative"),
             aes(x=0, y=0, label=Percentage), 
             hjust=-0.1, vjust=-1.3, show.legend=FALSE, size=3.5) +
        geom_text(data = filter(counts.now, quadrant == 4 & 
-                              `Ground truth` == "True-positive"),
+                              `Ground truth` == "True positive"),
             aes(x=Inf, y=0, label=Percentage),
             hjust=1, vjust=-0.1, show.legend=FALSE, size=3.5) +
     geom_text(data = filter(counts.now, quadrant == 4 & 
-                              `Ground truth` == "True-negative"),
+                              `Ground truth` == "True negative"),
             aes(x=Inf, y=0, label=Percentage), 
             hjust=1, vjust=-1.3, show.legend=FALSE, size=3.5)
   plots.round  
-  ggsave(here_out("plot-new-roche-measurement.pdf"), width=15, height=8)
+  ggsave("plot-new-roche-measurement.pdf", width=15, height=8)
   
 
 ```

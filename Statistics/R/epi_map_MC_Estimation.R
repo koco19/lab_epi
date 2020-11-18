@@ -21,7 +21,7 @@ library(cowplot)
 
 # Input and output locations used in this script
 here_maps_data = function (...) here::here("maps_data", ...)
-here_maps_out = function (...) here::here("maps_output", ...)
+here_maps_out = function (...) here::here("Epi_out", "epi_figures_merce", ...)
 
 # Polygon of districts
 m.sh <- readOGR(here_maps_data("neighbourhoods.geojson"))
@@ -87,6 +87,8 @@ ggplot() +
   theme_bw() +
   theme(legend.position = "bottom")
 ggsave(here_maps_out("Map-Sampling-Probability-MC.pdf"), height=6, width=10)
+ggsave(here_maps_out("Epi-Fig-SX.pdf"), height=6, width=10)
+ggsave(here_maps_out("Epi-Fig-SX.png"), height=6, width=10)
 
 # Comparison between the selected and not selected constituencies
 comparison <- sampling.prob.mc %>%
@@ -101,6 +103,6 @@ ggplot(comparison, aes(x=`Sampling probability`,
   geom_vline(xintercept = 0.1324503, lty=2) +
   theme(axis.text.y = element_blank())
 
-ggsave(
-  here_maps_out("Plot-Sampling-Probability-MC-vs-chosen-constituencies.pdf"),
-  width=6, height=4)
+# ggsave(
+#   here_maps_out("Plot-Sampling-Probability-MC-vs-chosen-constituencies.pdf"),
+#   width=6, height=4)

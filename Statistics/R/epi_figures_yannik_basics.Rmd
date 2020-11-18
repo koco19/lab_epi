@@ -1,5 +1,5 @@
 ---
-title: "Epi Paper Basic Statistics"
+title: "Epi Paper Basic Plots"
 author: "Yannik Schälte"
 output:
   html_document:
@@ -8,6 +8,8 @@ output:
 ---
 
 Compilation date: `r format(Sys.time(), '%d.%m.%Y')`
+
+Some very basic population visualizations.
 
 ```{r}
 library(ggplot2)
@@ -25,25 +27,29 @@ source(here_r("setup.R"))
 ###############################################################################
 # Prepare date
 
-# read pre-defined data set
-data_koco = read.csv(here_koco("Koco_baseline.csv"), stringsAsFactors = F)
+# Pre-defined population data set
+data_koco = read.csv(here_koco(
+  "Analysis Data Sets", "Koco_baseline.csv"), stringsAsFactors = F)
 if (any(data_koco$IgA_quant == 0 | data_koco$IgG_quant == 0 |
         data_koco$R_quant == 0, na.rm=T)) {
   stop("Zeros should be NAs.")
 }
 
-# location data
+# Location data
 data_building = read.csv(
   here_koco("Geocodes", "KoCo19_Haushalte4Modeler_20200909.csv"))
+# Add associations of households to addresses
 for (address_id in unique(data_building$address_id)) {
   data_building[data_building$address_id==address_id,"HouseholdsPerAddress"] =
     sum(data_building$address_id==address_id, na.rm=T)
 }
 ```
 
+# Study population
+
 ## Inhabitants per household
 
-```{r, fig.width=3, fig.height=3}
+```{r, fig.width=3.5, fig.height=3}
 data = data_koco[!duplicated(data_koco$hh_id),]
 unique(data$HouseholdSize)
 plt_inh_per_hh = ggplot(data, aes(x=HouseholdSize)) +
@@ -51,27 +57,24 @@ plt_inh_per_hh = ggplot(data, aes(x=HouseholdSize)) +
   labs(title="Inhabitants per household",
        y="Number of households", x="Household size")
 plt_inh_per_hh
-ggsave(here_out("inh_per_hh.png"), width=3, height=3)
 ```
 
 ## Households per building
 
-```{r, fig.width=3, fig.height=3}
+```{r, fig.width=3.5, fig.height=3}
 
 data = data_building[!duplicated(data_building$address_id),]
 
-unique(data$AddressSize)
 plt_hh_per_bdg = ggplot(data, aes(x=HouseholdsPerAddress)) +
   geom_bar() + scale_x_continuous(breaks=1:9) +
   labs(title="Households per building",
        y="Number of buildings", x="Number of households in same building")
 plt_hh_per_bdg
-ggsave(here_out("hh_per_bdg.png"), width=3, height=3)
 ```
 
 ## Inhabitants per building
 
-```{r, fig.width=3, fig.height=3}
+```{r, fig.width=3.5, fig.height=3}
 data1 = data_koco[c("ind_id", "hh_id", "HouseholdSize")]
 data2 = data_building[c("hht_ID", "address_id")]
 colnames(data2)[colnames(data2)=="hht_ID"] = "hh_id"
@@ -90,10 +93,116 @@ plt_inh_per_bdg = ggplot(data, aes(x=InhabitantsPerAddress)) +
   labs(title="Inhabitants per building", y="Number of buildings",
        x="Number of inhabitants in same building")
 plt_inh_per_bdg
-ggsave(here_out("inh_per_bdg.png"), width=3, height=3)
 ```
 
-```{r, fig.width=9, fig.height=3}
+```{r, fig.width=10.5, fig.height=3}
 ggpubr::ggarrange(plt_inh_per_hh, plt_hh_per_bdg, plt_inh_per_bdg, ncol = 3)
-ggsave(here_out("inh_hh_bdg.png"), width=9, height=3)
+ggsave(here_out("inh_hh_bdg.png"), width=9, height=3, dpi=720)
+ggsave(here_out("inh_hh_bdg.pdf"), width=9, height=3, device=cairo_pdf)
 ```
+
+# Positive tests
+
+```{r, fig.width=8, fig.height=4}
+data = data_koco
+
+# Positivity criterion
+data$Positive = data$R_quant >= cutoff$new$Roche
+
+# Take only members where household size was reported
+sum(is.na(data$HouseholdSize))
+data = data[!is.na(data$HouseholdSize),]
+
+# Assign positivity fractions for each household size
+for (hhsize in unique(data$HouseholdSize)) {
+  d = data[data$HouseholdSize == hhsize,]
+  # Fraction 1 is positives by all available test results
+  data[data$HouseholdSize == hhsize,
+       "Tested household members"] =
+    sum(d$Positive) / sum(!is.na(d$Positive))
+  # Fraction 2 is positives by extrapolated household size
+  data[data$HouseholdSize == hhsize,
+       "Household members"] =
+    sum(d$Positive) / (hhsize * length(unique(d$hh_id)))
+  # Number of participants for that household size
+  data[data$HouseholdSize == hhsize, "n"] = sum(!is.na(d$Positive))
+}
+
+data = data[!duplicated(data$HouseholdSize),]
+data = data[,c(
+  "HouseholdSize",
+  "Tested household members",
+  "Household members",
+  "n")]
+
+data
+
+# To long over fractions
+data_long = tidyr::gather(
+  data,
+  `Relative to total # of`, Value,
+  `Tested household members`:`Household members`)
+
+ggplot(data_long,
+       aes(x=factor(HouseholdSize), y=Value, fill=`Relative to total # of`)) +
+  geom_bar(stat="identity", position="dodge") +
+  geom_text(
+    data=data_long[data_long$`Relative to total # of`==
+                  "Tested household members",],
+    aes(label=n, y=-0.003)) +
+  scale_y_continuous(labels=scales::percent) +
+  labs(x="Household size",
+       y="Fraction of individuals\nwith positive test result")
+
+ggsave(here_out("PositiveFractions.png"), width=8, height=4, dpi=720)
+ggsave(here_out("PositiveFractions.pdf"), width=8, height=4, device=cairo_pdf)
+```
+
+```{r}
+# Grouping household sizes differently
+
+data = data_koco
+data$Positive = data$R_quant >= cutoff$new$Roche
+
+data = data[!is.na(data$HouseholdSize),]
+
+data[data$HouseholdSize==1, "HhsizeFactor"] = "1"
+data[data$HouseholdSize==2, "HhsizeFactor"] = "2"
+data[data$HouseholdSize %in% c(3,4), "HhsizeFactor"] = "3-4"
+
+data = data[!is.na(data$HhsizeFactor),]
+
+for (hhsize in unique(data$HhsizeFactor)) {
+  d = data[data$HhsizeFactor == hhsize,]
+  data[data$HhsizeFactor == hhsize, "PosRelHhsize"] = sum(d$Positive) / sum(!is.na(d$Positive))
+  data[data$HhsizeFactor == hhsize, "n"] = sum(!is.na(d$Positive))
+}
+
+data = data[!duplicated(data$HhsizeFactor),]
+
+ggplot(data, aes(x=factor(HhsizeFactor), y=PosRelHhsize)) +
+  geom_bar(stat="identity") + geom_text(aes(label=n, y=PosRelHhsize+0.001)) +
+  labs(x="Household size", y="Fraction of positive tests")
+```
+
+```{r}
+# Number of positives in household sizes
+
+data = data_koco
+data$Positive = data$R_quant >= cutoff$new$Roche
+
+# Roche values available for all?
+cat("Roche not available: ", any(is.na(data$R_quant)), "\n")
+cat("Number of households:", length(unique(data$hh_id)), "\n")
+
+for (hh_id in unique(data$hh_id)) {
+  data[data$hh_id == hh_id, "PosInHh"] = sum(data$hh_id == hh_id & data$Positive)
+}
+
+data_uq_hh = data[!duplicated(data$hh_id),]
+table(data_uq_hh$HouseholdSize, data_uq_hh$PosInHh)
+
+sum(data$Positive)
+
+```
+

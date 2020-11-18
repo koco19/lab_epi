@@ -1542,27 +1542,42 @@ before_time<- as.data.frame(before_time)
 colnames(before_time)[1]<- "Week_BloodDraw"
 before_time$labels<- paste(before_time$Week_BloodDraw,"\n(n=0)", sep="")
 
-#rrp<- rbind.fill(before_time,rrp)
+rrp$labels1<- str_remove(rrp$labels,"Week-")
 
-rpps<-ggplot(rrp, aes(x=labels, group=Test)) +
-         geom_ribbon(aes(ymin = pplci, ymax = ppuci),fill = "grey70", alpha=0.5)+
-         geom_point(aes(y=rate), colour="blue")+
-         geom_line(aes(y=rate), colour="blue")+ 
-         geom_line(aes(y=lci), colour="red",linetype=2)+
-         geom_line(aes(y=uci), colour="red",linetype=2)+ 
-         theme(axis.text.x = element_text(angle = 90))+
-         xlab("Week of Blooddraw")+ ylab("Test positivity rate")+
+rpps<-ggplot(rrp, aes(x=labels1, group=Test))+ 
+         
+         geom_ribbon(aes(ymin = pplci, ymax = ppuci,fill = "95% CI for overall seroprevalence"), alpha=0.4)+
+         geom_point(aes(y=rate, colour="Weekly seroprevalence"))+
+         geom_line(aes(y=rate, colour="Weekly seroprevalence"))+ 
+         #geom_line(aes(y=lci, colour="red"),linetype=2)+
+         #geom_line(aes(y=uci), colour="red",linetype=2)+ 
+         geom_ribbon(aes(ymin =lci, ymax = uci,fill = "95% CI for weekly seroprevalence"), alpha=0.4)+
+         #scale_x_discrete(labels = c("15","16","17","18","19","20","21","22","23+"))+
+         #theme(axis.text.x = element_text(angle = 65))+
+         xlab("Week of Blooddraw")+ ylab("Estimated seroprevalence")+
          facet_grid(group1~group2)+
-         geom_line(aes(y=ppest),size=1.2)+
+         geom_line(aes(y=ppest, colour="Overall seroprevalence", group=1),size=1.2)+
          scale_y_continuous(n.breaks = 5,labels = scales::percent_format(accuracy = 1L))+
-              ggtitle("Seropositivity with Roche N pan-Ig (KOCO19 cohort)")
-         #ggtitle(paste("Seropositivity with Roche N\n",
-              #"Blue line - weekly estimates\n",
-              #"Red line - condidence interval\n",
-              #"Black line - prevalence over the entire recruitment period\n",
-              #"Grey zone - confidence around the prevalence"))
+              ggtitle("Seropositivity with Ro-N-Ig (KoCo-19 cohort)")+
+         scale_colour_manual(name='',values=c("Overall seroprevalence" = "#000000",
+                                              "Weekly seroprevalence" = "#0072B2"))+
+         scale_fill_manual(name='', values=c("95% CI for overall seroprevalence" = "grey50",
+                                             "95% CI for weekly seroprevalence"= "grey80"))+
+         theme(legend.position="bottom")+
+          guides(fill=guide_legend(nrow=2,byrow=TRUE),
+                 colour=guide_legend(nrow=2,byrow=TRUE))+
+  theme(axis.ticks = element_line(colour = "black", size = 2))+
+  theme(axis.text =  element_text(colour = "black"))+
+  theme(
+    strip.text.x = element_text(
+      size = 10, color = "black"),
+    strip.text.y = element_text(
+      size = 10, color = "black")
+  )+
+  theme(legend.text=element_text(size=12))
+         
 rpps
-ggsave(here_out("rocheseropositivity.jpeg"), height=10, width=8, dpi=720,units="in")
+ggsave(here_out("rocheseropositivity.jpeg"), height=7, width=10, dpi=720,units="in")
 
 # Final graphic main paper
 # Add Manufacturer cut off estimates

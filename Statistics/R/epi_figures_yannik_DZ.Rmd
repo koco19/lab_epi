@@ -287,7 +287,7 @@ plt_prevalence = ggplot(
   labs(x="", y="Prävalenz-Schätzer")
 plt_prevalence
 ggsave(here_out("DZ_prevalence.png"), width=2.5, height=3.5, dpi=720)
-ggsave(here_out("DZ_prevalence.pdf"), width=2.5, height=3.5, dpi=720)
+ggsave(here_out("DZ_prevalence.pdf"), width=2.5, height=3.5, dpi=720, device=cairo_pdf)
 ```
 
 ## Combined
@@ -322,7 +322,7 @@ plt_1 = plot_grid(
 )
 plt_1
 ggsave(here_out("DZ_fig1.png"), width=10, height=5, dpi=720)
-ggsave(here_out("DZ_fig1.pdf"), width=10, height=5, dpi=720)
+ggsave(here_out("DZ_fig1.pdf"), width=10, height=5, dpi=720, device=cairo_pdf)
 ```
 
 # Figure 2 (Mortality)
@@ -464,5 +464,5 @@ plt_2= plot_grid(
 )
 plt_2
 ggsave(here_out("DZ_fig2.png"), width=10, height=3, dpi=720)
-ggsave(here_out("DZ_fig2.pdf"), width=10, height=3, dpi=720)
+ggsave(here_out("DZ_fig2.pdf"), width=10, height=3, dpi=720, device=cairo_pdf)
 ```

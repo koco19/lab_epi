@@ -14,7 +14,7 @@ library(ggplot2)
 
 here_r = function (...) here::here("Statistics", "R", ...)
 here_koco = function (...) here::here("KoCo19_Datasets", ...)
-here_epi_out = function (...) here::here("Epi_out", ...)
+here_epi_out = function (...) here::here("Epi_out", "epi_figures_merce", ...)
 
 # Setup
 source(here_r("setup.R"))
@@ -221,7 +221,7 @@ lab %>%
   geom_hline(data=filter(thresholds.now, Threshold=="Optimized"),
              aes(yintercept=IgG, linetype=style$thr_lb_new),
               color=style$thr_lc_new) +
-  scale_linetype_manual(name="Threshold",
+  scale_linetype_manual(name="Cut-off",
                         values=c(style$thr_lt_old,style$thr_lt_new)) +
   geom_vline(data=filter(thresholds.now, Threshold=="Manufacturer"),
              aes(xintercept=Roche, linetype=style$thr_lb_old),
@@ -231,8 +231,8 @@ lab %>%
               color=style$thr_lc_new, show.legend=FALSE) +
   xlab("Ro-N-Ig") + ylab("EI-S1-IgG") 
   
-ggsave("Epi-Figure-S1-201029.png", width=8, height=5)
-ggsave("Epi-Figure-S1-201029.pdf", width=8, height=5)
+ggsave(here_epi_out("Epi-Fig-S1.png"), width=8, height=5)
+ggsave(here_epi_out("Epi-Fig-S1.pdf"), width=8, height=5)
 
 
 
@@ -267,7 +267,7 @@ lab.long.bin %>%
   geom_hline(data=filter(thresholds.now, Threshold=="Optimized"),
              aes(yintercept=IgG, linetype=style$thr_lb_new),
               color=style$thr_lc_new) +
-  scale_linetype_manual(name="Threshold",
+  scale_linetype_manual(name="Cut-off",
                         values=c(style$thr_lt_old,style$thr_lt_new)) +
   geom_vline(data=filter(thresholds.now, Threshold=="Manufacturer"),
              aes(xintercept=Roche, linetype=style$thr_lb_old),
@@ -276,11 +276,16 @@ lab.long.bin %>%
              aes(xintercept=Roche, linetype=style$thr_lb_new),
               color=style$thr_lc_new, show.legend=FALSE) +
   xlab("Ro-N-Ig") + ylab("EI-S1-IgG") 
+
   
-ggsave("Epi-Figure-S2-201029.png", width=10, height=5)
-ggsave("Epi-Figure-S2-201029.pdf", width=10, height=5)
+ggsave(here_epi_out("Epi-Fig-S2.png"), width=10, height=5)
+ggsave(here_epi_out("Epi-Fig-S2.pdf"), width=10, height=5)
 
 # Epi overall test results Roche vs the other tests
+thresholds.now.b <- left_join(thresholds, Test.names) %>%
+  filter(!name %in% c("NP-229E", "NP NL63", "NP-OC43", "NP-HKU1")) %>%
+  droplevels()
+
 lab %>%
   gather(Test, value, -ind_id, -Roche) %>%
   left_join(Test.names) %>%
@@ -293,13 +298,29 @@ lab %>%
   mutate(value = as.numeric(value)) %>%
   droplevels() %>%
   ggplot(aes(x=Roche, y=value)) +
-  geom_point(alpha=0.5) +
+  geom_point(alpha=0.5, colour=style$col_grey) +
   scale_y_log10(breaks=c(0.1, 1, 5, 10, 20, 40, 80), 
                 labels=c("<0.1", "<1", "<10", "10", "20", "40", ">80")) + 
   scale_x_log10() +
   facet_wrap(~name, scales="free") +
-  ylab("Test value") + xlab("Ro-N-Ig") 
+  geom_hline(data=filter(thresholds.now.b, Test != "Roche"),
+               aes(yintercept=Manufacturer, lty=style$thr_lb_old),
+               color=style$thr_lc_old)  +
+   geom_hline(data=filter(thresholds.now.b, Test != "Roche"),
+              aes(yintercept=Optimized, lty=style$thr_lb_new),
+               color=style$thr_lc_new) +
+   scale_linetype_manual(name="Cut-off",
+                         values=c(style$thr_lt_old,style$thr_lt_new)) +
+  geom_vline(data=filter(thresholds.now, Threshold=="Manufacturer"),
+             aes(xintercept=Roche, linetype=style$thr_lb_old),
+              color=style$thr_lc_old, show.legend=FALSE)  +
+  geom_vline(data=filter(thresholds.now, Threshold=="Optimized"),
+             aes(xintercept=Roche, linetype=style$thr_lb_new),
+              color=style$thr_lc_new, show.legend=FALSE) +
+  ylab("Measurement value") + xlab("Ro-N-Ig")
 
+ggsave(here_epi_out("Epi-Fig-S2-alternative.png"), width=10, height=5)
+ggsave(here_epi_out("Epi-Fig-S2-alternative.pdf"), width=10, height=5)
   
 
 ```

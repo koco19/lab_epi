@@ -1,0 +1,158 @@
+---
+title: "Deaths/Cases plot"
+author: "Mercè Garí"
+date: '2020-11-13'
+output:
+  flexdashboard::flex_dashboard:
+    orientation: rows
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+#rmarkdown::render("dashboard.Rmd") # to run it
+
+here_r = function (...) here::here("Statistics", "R", ...)
+here_output = function (...) here::here("Statistics", "Output", ...)
+here_epi_out = function (...) here::here("Epi_out", "epi_figures_merce", ...)
+
+
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(ggthemes)
+library(GGally)
+library(colorspace)
+library(readxl)
+library(forcats)
+library(scales)
+
+col_grey = "#999999"
+col_trueneg = "#56B4E9" #"#0072B2"
+col_truepos = "#D55E00"
+pal <- c(col_grey, col_trueneg, col_truepos)
+
+
+# Figure with new data (October 30th)
+# Load data for Odds Ratio Multivariate Analysis Roche
+d.orig <- read_xlsx(here_output("IFR_estimates_agecat.xlsx"),
+                    sheet = 1)
+d.orig
+
+base_breaks <- function(n = 10){
+    function(x) {
+        axisTicks(log10(range(x, na.rm = TRUE)), 
+                  log = TRUE, n = n)
+    }
+}
+
+prettyNum0 <- function(x){
+  ifelse(x > 2e-5, sprintf("%.5g", x), "0.00001")
+}
+
+text.to.add =
+
+adjusted <- d.orig %>%
+  filter(Type %in% "adjusted") %>%
+  select(-Type) %>%
+  mutate(colors.age = ifelse(`Pop_strata` == ">80", "2", ifelse(`Pop_strata` == "Total",
+                                                            "3", "1")),
+         colors.age = factor(colors.age)) %>%
+  rename(Age = "Pop_strata") %>%
+  mutate(Age = fct_inorder(Age)) %>%
+  mutate(age.order = as.numeric(Age)) %>%
+  mutate(Age = ifelse(Age != "Total", paste(Age, " years\nNum. Cases = ",
+                                            `number_reported_cases`, "\nNum. Deaths = ",
+                                            `number_reported_deaths`, sep=""),
+                      paste(Age, "\nNum. Cases = ",
+                                            `number_reported_cases`, "\nNum. Deaths = ",
+                                            `number_reported_deaths`, sep=""))) %>%
+  mutate(Age = fct_reorder(Age, age.order)) %>%  
+  select(Age, seroprevalence, seroprevalence_lci, seroprevalence_uci,
+         ifr_mean_pct, ifr_lci_pct, ifr_uci_pct, colors.age) %>%
+  gather(Variable, Value, -Age, -colors.age) %>%
+  mutate(Value = Value*100) %>%
+  mutate(Type = ifelse(Variable %in% c("seroprevalence", "seroprevalence_lci",
+                                       "seroprevalence_uci"), "Seroprevalence", "Infection Fatality Rate")) %>%
+  mutate(Type = fct_inorder(Type)) %>%
+  mutate(Variable = case_when(
+    Variable %in% c("seroprevalence","ifr_mean_pct") ~ "mean",
+    Variable %in% c("seroprevalence_lci", "ifr_lci_pct") ~ "low",
+    Variable %in% c("seroprevalence_uci", "ifr_uci_pct") ~ "high")) %>%
+  spread(Variable, Value) %>%
+  ggplot(aes(y=mean, x=fct_rev(Age), color=colors.age)) +
+   geom_point(position=position_dodge(width=0.5),
+) +
+  geom_linerange(aes(ymin=low, ymax=high), 
+                 position=position_dodge(width=0.5)) +
+    theme_bw() +
+  coord_flip() +
+  scale_y_continuous(trans = log_trans(), breaks = base_breaks(),
+                   labels = prettyNum) + 
+#  scale_y_log10(labels=function(n){format(n, scientific=FALSE)}) +
+  facet_wrap(~fct_inorder(Type), scales="free_x") +
+  ylab("Estimate (95% CI)") + xlab("") +
+  theme(legend.position = "none") +
+  scale_color_manual(values=c(pal, pal)) #+
+  annotate("text", x=2, y=100, label="*")
+adjusted
+
+# Save the figure in pdf and png
+ggsave(here_epi_out("Epi-prev-ifr.pdf"), width = 8, height=4)
+ggsave(here_epi_out("Epi-prev-ifr.png"), width = 8, height=4)
+
+
+#------------------------------------------------------------------------
+# For Age and Sex
+
+# Figure with new data (October 30th)
+# Load data for Odds Ratio Multivariate Analysis Roche
+d.orig <- read.csv(here_output("age_sex_stratified.csv"),
+                    header=TRUE, sep=",")
+d.orig
+
+base_breaks <- function(n = 10){
+    function(x) {
+        axisTicks(log10(range(x, na.rm = TRUE)), 
+                  log = TRUE, n = n)
+    }
+}
+
+prettyNum0 <- function(x){
+  ifelse(x > 2e-5, sprintf("%.5g", x), "0.00001")
+}
+
+adjusted <- d.orig %>%
+  select(X, prevalence_adj, l_95ci_p_adj, u_95ci_p_adj, 
+         population, number_cases) %>%
+  mutate(X = fct_inorder(X)) %>%
+  mutate(X.order = as.numeric(X)) %>%
+  mutate(X = fct_reorder(X, X.order)) %>%  
+  gather(Variable, Value, -X, -population, -number_cases) %>%
+  mutate(Value = Value*100) %>%
+  mutate(Value = ifelse(Value < 0, 0, Value)) %>%
+  spread(Variable, Value) %>%
+  separate(X, c("Age", "Sex"), "_") %>%
+  mutate(Sex = ifelse(is.na(Sex), "Overall", Sex),
+         Age = ifelse(Age == "total", "Total", Age),
+         Age = ifelse(Age == ">=80", ">80", Age),
+         Age = ifelse(Age == "Total", "Total", paste(Age, " years"))) %>%
+  mutate(Age = fct_inorder(Age)) %>%
+  ggplot(aes(y=prevalence_adj, x=fct_rev(Age), color=Sex)) +
+   geom_point(position=position_dodge(width=0.5)) +
+  geom_linerange(aes(ymin=l_95ci_p_adj, ymax=u_95ci_p_adj), 
+                 position=position_dodge(width=0.5)) +
+    theme_bw() +
+  coord_flip() +
+  ylab("Adjusted prevalence (95% CI)") + xlab("") +
+   scale_color_manual(values=pal[c(3,2,1)])
+adjusted
+
+# Save the figure in pdf and png
+ggsave(here_epi_out("Epi-prev-age-sex.pdf"), width = 6, height=4)
+ggsave(here_epi_out("Epi-prev-age-sex.png"), width = 6, height=4)
+
+```
+
+
+

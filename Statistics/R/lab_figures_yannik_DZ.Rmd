@@ -1,5 +1,5 @@
 ---
-title: "Lab Paper 1st part"
+title: "Lab Paper 1st part German"
 author: "Yannik Schälte"
 output:
   html_document:
@@ -8,9 +8,6 @@ output:
 ---
 
 Compilation date: `r format(Sys.time(), '%d.%m.%Y')`
-
-The figures used in the lab manuscript are generated in the last section of
-the notebook, the previous parts creating subplots and detailed analyses.
 
 # Prepare
 
