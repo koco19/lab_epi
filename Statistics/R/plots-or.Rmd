@@ -13,7 +13,6 @@ editor_options:
 #rmarkdown::render("dashboard.Rmd") # to run it
 
 here_r = function (...) here::here("Statistics", "R", ...)
-here_output = function (...) here::here("Statistics", "Output", ...)
 here_epi_out = function (...) here::here("Epi_out", "epi_figures_merce", ...)
 
 
@@ -34,7 +33,7 @@ pal <- c(col_grey, col_trueneg, col_truepos)
 
 # Figure with new data (October 30th)
 # Load data for Odds Ratio Multivariate Analysis Roche
-d.orig <- read_xlsx(here_output("OR_Multiple Regression_Final.xlsx"),
+d.orig <- read_xlsx(here_epi_out("OR_Multiple Regression_Final.xlsx"),
                     skip=1, sheet = 1)
 d.orig
 freq <- d.orig[,1:5]
@@ -87,7 +86,7 @@ ggsave("Epi-Fig-5.png", width=7, height=3)
 
 #################################################################
 # Load data OR Roche
-d.orig <- read.csv(here_output("Odds Ratio _Roche1a.csv"), 
+d.orig <- read.csv(here_epi_out("Odds Ratio _Roche1a.csv"), 
                    sep=";", header=TRUE)
 str(d.orig)
 

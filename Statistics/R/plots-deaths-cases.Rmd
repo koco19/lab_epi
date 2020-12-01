@@ -13,7 +13,6 @@ editor_options:
 #rmarkdown::render("dashboard.Rmd") # to run it
 
 here_r = function (...) here::here("Statistics", "R", ...)
-here_output = function (...) here::here("Statistics", "Output", ...)
 here_epi_out = function (...) here::here("Epi_out", "epi_figures_merce", ...)
 
 
@@ -35,7 +34,7 @@ pal <- c(col_grey, col_trueneg, col_truepos)
 
 # Figure with new data (October 30th)
 # Load data for Odds Ratio Multivariate Analysis Roche
-d.orig <- read_xlsx(here_output("IFR_estimates_agecat.xlsx"),
+d.orig <- read_xlsx(here_epi_out("IFR_estimates_agecat.xlsx"),
                     sheet = 1)
 d.orig
 
@@ -107,7 +106,7 @@ ggsave(here_epi_out("Epi-prev-ifr.png"), width = 8, height=4)
 
 # Figure with new data (October 30th)
 # Load data for Odds Ratio Multivariate Analysis Roche
-d.orig <- read.csv(here_output("age_sex_stratified.csv"),
+d.orig <- read.csv(here_epi_out("age_sex_stratified.csv"),
                     header=TRUE, sep=",")
 d.orig
 

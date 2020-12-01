@@ -1,0 +1,110 @@
+---
+title: "Prevalence Plot"
+author: "Mercè Garí"
+date: '2020-10-09'
+output:
+  flexdashboard::flex_dashboard:
+    orientation: rows
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+
+here_r = function (...) here::here("Statistics", "R", ...)
+here_prevalence = function (...) here::here("SamplingWeights", ...)
+here_epi_out = function (...) here::here("Epi_out", "epi_figures_merce", ...)
+
+# Setup
+source(here_r("setup.R"))
+
+
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(ggthemes)
+library(GGally)
+library(colorspace)
+library(readxl)
+library(forcats)
+library(scales)
+library(gridExtra)
+library(cowplot)
+library(Cairo)
+
+col_grey = "#999999"
+col_trueneg = "#56B4E9" #"#0072B2"
+col_truepos = "#D55E00"
+black = "#000000"
+pal <- c(col_grey, col_trueneg, col_truepos, black)
+
+
+d <- read.csv(here_prevalence("All_estimates.csv"))
+
+head(d)
+str(d)
+
+
+  
+# For the plot (with black unadjusted)
+plot <- d %>%
+  mutate(test = case_when(
+    test == "Roche" ~ "Ro-N-Ig",
+    test == "IgA" ~ "EI-S1-IgA",
+    test == "IgG" ~ "EI-S1-IgG",
+    test == "RF" ~ "Random Forest",
+    test == "SVM" ~ "Support Vector Machine")) %>%
+  mutate(cut_off = case_when(
+      cut_off == "manufacturer" ~ "\n(Manufacturer's cut-off)",
+      cut_off %in% c("optimised", "optimized") ~ "\n(Optimised cut-off)")) %>%
+  mutate(Classifier = paste(test, cut_off, sep="")) %>%
+  mutate(`Specificity/Sensitivity` = case_when(
+    adjustment == "unadjusted for spec./sens." ~ "Unadjusted for spec./sens.",
+    adjustment == "optimised" ~ "Evaluated on the data",
+    adjustment == "manufacturer (high sens)" ~ "Manufacturer (high sensitivity)",
+    adjustment == "manufacturer (low sens)" ~ "Manufacturer (low sensitivity)")) %>%
+  mutate(order.adjustment = as.numeric(as.factor(adjustment))) %>%
+  mutate(`Specificity/Sensitivity` = fct_reorder(`Specificity/Sensitivity`, order.adjustment)) %>%
+  mutate(calculation = case_when(
+    calculation == "weighted" ~ "Weighted",
+    calculation == "unweighted" ~ "Unweighted")) %>%
+  mutate(Classifier = ifelse(Classifier == "Random Forest\n(Optimised cut-off)", "Random Forest",
+                             ifelse(Classifier == "Support Vector Machine\n(Optimised cut-off)", "Support Vector Machine", Classifier))) %>%
+  mutate(order.Classifier = as.numeric(as.factor(Classifier)),
+         reorder.Classifier = case_when(
+           order.Classifier == 1 ~ 1,
+           order.Classifier == 2 ~ 2,
+           order.Classifier == 3 ~ 3,
+           order.Classifier == 4 ~ 4,
+           order.Classifier == 5 ~ 7,
+           order.Classifier == 6 ~ 5,
+           order.Classifier == 7 ~ 6,
+           order.Classifier == 8 ~ 8),
+         Classifier = fct_reorder(Classifier, reorder.Classifier)) %>%
+  ggplot(aes(y=estimate, 
+             x=fct_rev(Classifier), 
+             color=`Specificity/Sensitivity`)) +
+  geom_point(position=position_dodge(width=0.5)) +
+  geom_linerange(aes(ymin=lower_ci,
+                     ymax=upper_ci), 
+                 position=position_dodge(width=0.5)) +
+  coord_flip() +
+  scale_linetype_manual(values=c(1,6)) +
+  scale_color_manual(values=pal[c(3,2,1,4)]) +
+  xlab("") + ylab("Seroprevalence (%)") +
+  theme_bw() +
+  facet_wrap(~calculation)
+
+plot
+  
+ggsave(here_epi_out(file="Epi-Fig-S3.pdf"), 
+       device=cairo_pdf,
+       width=10, height=6)
+
+ggsave(here_epi_out(file="Epi-Fig-S3.png"), 
+       width=10, height=6)
+
+```
+
+
+
