@@ -37,5 +37,5 @@ in order to re-run time-intensive parts.
 
 There are several readmes in the folder R that elaborate on the R scripts included in that folder. The following list indicates what the readmes and the corresponding R script are about:
 
-* `Readme_classifier.md`: Cutoff optimization for single tests, performance (specificity, sensitivity and overall accuracy) calculation for different classifiers, and adjustment of seroprevalence estimates for the Munich population by accounting for the performance.
+* `Readme_classifier.md`: Cutoff optimization for single tests, performance (specificity, sensitivity and overall accuracy) calculation for different classifiers.
 * `Readme_maps.md`: Requirements and instructions for creating the maps featured in the manuscripts.

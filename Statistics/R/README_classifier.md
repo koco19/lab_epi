@@ -1,6 +1,6 @@
 # Classifier
 
-Cutoff optimization for single tests, performance (specificity, sensitivity and overall accuracy) calculation for different classifiers, and adjustment of seroprevalence estimates for the Munich population by accounting for the performance.
+Cutoff optimization for single tests, performance (specificity, sensitivity and overall accuracy) calculation for different classifiers.
 
 ## Responsibles
 
