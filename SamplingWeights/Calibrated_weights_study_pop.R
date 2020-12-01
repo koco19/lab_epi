@@ -1,6 +1,9 @@
+  
 #' This script calibrates the sampling weights (from the script Sampling_weights.R)
 #' and calculates the variance associated with the estimation of the proportion of ppl.
-#' infected y the virus(positive tested).
+#' infected y the virus (positive tested). The results are adjusted for specificity and
+#' sensitivity of the tests. This script also computes the number of registered PCR positive
+#' cases in private households based on our survey.
 #' 
 
 rm(list = ls())
@@ -20,6 +23,7 @@ here_weights = function(...) here::here("SamplingWeights", ...)
 library(descr)
 library(reshape2)
 library(sampling)
+library(ggplot2)
 
 
 #############################
@@ -44,6 +48,12 @@ KoCo19 <- read.csv(here_koco_data("Analysis Data Sets/ind_lab_baseline_new.csv")
 # that these missing values are children.
 KoCo19$Age[is.na(KoCo19$Age) & KoCo19$obs_hh_members > 2] <- 10
 
+
+###
+# KoCo data with the PCR-test results
+###
+
+data_pcr <- read.csv(here_koco_data("Analysis Data Sets/ind_characteristics_new.csv"))
 
 ###
 # Data set with the constituencies
@@ -172,7 +182,7 @@ rm(margins_age_sex, country_germany_unknow, country_other, n_single_house, n_mul
 
 
 # Creating age categories matching the information about Munich 
-KoCo_BLab$age_cat <- cut(KoCo_BLab$Age, c(14, 19, 34, 49, 64, 80, 150),
+KoCo_BLab$age_cat <- cut(KoCo_BLab$Age, c(14, 19, 34, 49, 64, 79, 150),
                             include.lowest = TRUE,
                             right = TRUE,
                             labels = c("14-19", "20-34", "35-49", "50-64",
@@ -408,7 +418,7 @@ g_trunc <- calib(data_house, d = d_house, totals, method = "truncated",
 
 ### method "logit"
 g_logit <- calib(data_house, d = d_house, totals, method="logit",
-           bounds=c(0.3,3.01), max_iter = 2000)  
+           bounds=c(0.3,3), max_iter = 2000)  
 w_hh_cal_logit <- g_logit * d_house
 
 # Checking if calibrated weights sum up to auxiliary data
@@ -455,7 +465,7 @@ g_trunc <- calib(data_house_igg, d = d_house, totals, method = "truncated",
 
 ### method "logit"
 g_logit <- calib(data_house_igg, d = d_house, totals, method="logit",
-                 bounds=c(0.3,3.01), max_iter = 2000)  
+                 bounds=c(0.3,3), max_iter = 2000)  
 w_hh_cal_logit <- g_logit * d_house
 
 # Checking if calibrated weights sum up to auxiliary data
@@ -534,11 +544,11 @@ KoCo_Weights <- KoCo_Weights[, c("hh_id", "ind_id", "Age", "Sex", "Birth_Country
                                  "w_hh_samp", "w_ind_samp","w_hh_samp_igg", "w_ind_samp_igg")]
 
 ### Export table
-write.csv(KoCo_Weights, here_koco_data("Analysis Data Sets/KoCo_weigths.csv"), row.names = FALSE)
+write.csv(KoCo_Weights, here_koco_data("Analysis Data Sets/KoCo_weights.csv"), row.names = FALSE)
 
 
 # Removing temporary data
-rm(list = setdiff(ls(), c("here_weights", "here_koco_data", "here_algo_results", "KoCo_BLab", "data_house", "Const", "Munich_hh")))
+rm(list = setdiff(ls(), c("here_weights", "here_koco_data", "here_algo_results", "KoCo_BLab", "data_house", "Const", "Munich_hh", "data_pcr")))
 
 
 #############################
@@ -1072,8 +1082,10 @@ l_ci_svm <- p_svm - qnorm(0.975) * sqrt(p_svm/100*(1-p_svm/100)/length(unique(Ko
 #############################
 
 results <- data.frame(calculation = rep(c("weighted", "unweighted"), each = 8),
-                       test = rep(c("Roche", "IgG", "IgA", "Roche_manu", "IgG_manu", "IgA_manu",
+                       test = rep(c(rep(c("Roche", "IgG", "IgA"), times = 2),
                                     "RF", "SVM"), times = 2),
+                      cut_off = rep(c(rep(c("optimised", "manufacturer"), each = 3), rep("optimized", 2)), times = 2),
+                      adjustment = "unadjusted for spec./sens.",
                        estimate = c(w_p_roche, w_p_igg, w_p_iga, 
                                     w_p_roche_manu, w_p_igg_manu, w_p_iga_manu,
                                     w_p_rf, w_p_svm,
@@ -1093,8 +1105,6 @@ results <- data.frame(calculation = rep(c("weighted", "unweighted"), each = 8),
                                     u_ci_roche_manu, u_ci_igg_manu, u_ci_iga_manu,
                                     u_ci_rf, u_ci_svm))
 
-### Export results
-write.csv(results, here_weights("Estimates.csv"), row.names = FALSE)
 
 #############################
 # Adjust for sensitivity and specificity
@@ -1112,47 +1122,224 @@ spec_sens_classifier <- spec_sens_classifier[c("Roche N pan-Ig optimized cut-off
                                                "Random Forest",
                                                "SVM"), ]
 
+### Adjust optimized and manufacturer cut-off estimates 
+# with optimized specificity and sensitivity 
+
+results_adj_opt <- results
+                         
+
+results_adj_opt[ , c("estimate", "lower_ci", "upper_ci")] <- (results_adj_opt[ , c("estimate", "lower_ci", "upper_ci")]/100 +
+  spec_sens_classifier$Specificity - 1)/(spec_sens_classifier$Sensitivity + spec_sens_classifier$Specificity - 1)*100
+
+results_adj_opt$adjustment <- "optimised"
+
+
+
 ### Manufacturers specificity and sensitivity: Check folder Sensit_Spec
 
 # Change specificity and sensitivity (7-13 days for Roche, 11-20 days for IgG and IgA) for manufacturers
-spec_sens_classifier["Roche N pan-Ig manufacturer's cut-off", ] <- c(0.998, 0.853)
-spec_sens_classifier["Euroimmun S1 IgG manufacturer's cut-off", ] <- c(0.993, 0.875)
-spec_sens_classifier["Euroimmun S1 IgA manufacturer's cut-off", ] <- c(0.924, 0.917)
+spec_sens_manuf <- data.frame(test = c("Roche", "IgG", "IgA"),
+                              Specificity = c(0.998, 0.993, 0.924),
+                              Sensitivity = c(0.853, .875, 0.917))
 
 
 ### Adjust for specificity and sensitivity (7-13 days for Roche, 11-20 days for IgG and IgA)
-results_adj <- results
+results_adj_manuf_low <- results[results$cut_off == "manufacturer", ]
 
-results_adj[, c("estimate", "lower_ci", "upper_ci")] <- (results_adj[, c("estimate", "lower_ci", "upper_ci")]/100 +
-  spec_sens_classifier$Specificity - 1)/(spec_sens_classifier$Sensitivity + spec_sens_classifier$Specificity - 1)*100
+results_adj_manuf_low[ , c("estimate", "lower_ci", "upper_ci")] <- (results_adj_manuf_low[, c("estimate", "lower_ci", "upper_ci")]/100 +
+                                                                      spec_sens_manuf$Specificity - 1)/(spec_sens_manuf$Sensitivity + spec_sens_manuf$Specificity - 1)*100
+
+
+results_adj_manuf_low$adjustment <- "manufacturer (low sens)"
 
 
 ### Adjust for specificity and sensitivity (>= 14 days for Roche, >=21 days for IgG and IgA)
 
 # Change specificity and sensitivity (>=14 days for Roche, >=21 days for IgG and IgA) for manufacturers
-spec_sens_classifier["Roche N pan-Ig manufacturer's cut-off", ] <- c(0.998, 0.995)
-spec_sens_classifier["Euroimmun S1 IgG manufacturer's cut-off", ] <- c(0.993, 1)
-spec_sens_classifier["Euroimmun S1 IgA manufacturer's cut-off", ] <- c(0.924, 1)
+spec_sens_manuf$Sensitivity <- c(0.995, 1, 1)
+
+results_adj_manuf_high <- results[results$cut_off == "manufacturer", ]
+
+results_adj_manuf_high[ , c("estimate", "lower_ci", "upper_ci")] <- (results_adj_manuf_high[, c("estimate", "lower_ci", "upper_ci")]/100 +
+                                                                       spec_sens_manuf$Specificity - 1)/(spec_sens_manuf$Sensitivity + spec_sens_manuf$Specificity - 1)*100
 
 
-results_adj_2 <- results
-
-results_adj_2[, c("estimate", "lower_ci", "upper_ci")] <- (results_adj_2[, c("estimate", "lower_ci", "upper_ci")]/100 +
-                                                           spec_sens_classifier$Specificity - 1)/(spec_sens_classifier$Sensitivity + spec_sens_classifier$Specificity - 1)*100
+results_adj_manuf_high$adjustment <- "manufacturer (high sens)"
 
 
-### Export results
+#############################
+# Export results
+#############################
 
-# Merge the results for the different sensitivities
+### 
 
-results_adj$test[results_adj$test == "Roche_manu"] <- "Roche_manu_7_13"
-results_adj$test[results_adj$test == "IgG_manu"] <- "IgG_manu_11_20"
-results_adj$test[results_adj$test == "IgA_manu"] <- "IgA_manu_11_20"
+# Merge the tables 
 
-results_adj_2$test[results_adj_2$test == "Roche_manu"] <- "Roche_manu_14_plus"
-results_adj_2$test[results_adj_2$test == "IgG_manu"] <- "IgG_manu_21_plus"
-results_adj_2$test[results_adj_2$test == "IgA_manu"] <- "IgA_manu_21_plus"
+results_adj <- rbind(results_adj_opt, results_adj_manuf_high, results_adj_manuf_low)
 
-results_adj <- rbind(results_adj[1:6,], results_adj_2[4:6,], results_adj[7:14,], results_adj_2[12:16,])
+estimates <- rbind(results, results_adj)
 
-write.csv(results_adj, here_weights("Estimates_adjusted.csv"), row.names = FALSE)
+# Change negative estimates to 0
+estimates[ , c("estimate", "lower_ci", "upper_ci")][estimates[ , c("estimate", "lower_ci", "upper_ci")] < 0] <- 0
+
+# Export
+write.csv(estimates, here_weights("All_estimates.csv"), row.names = FALSE)
+
+
+###
+# Tidy
+###
+
+rm(list = setdiff(ls(), c("here_weights", "here_koco_data", "KoCo_BLab", "data_house", "Const", "Munich_hh", "data_pcr", "estimates")))
+
+
+#############################
+# Variance associated to the estimated number of reported cases
+#############################
+
+
+###
+# Add the variable PCR to the KoCo data set
+###
+
+KoCo_BLab <- merge(KoCo_BLab, data_pcr[, c("ind_id", "Testing_positive")], all.x = TRUE)
+
+table(KoCo_BLab$Testing_positive, useNA = "always")
+
+KoCo_BLab$Testing_positive[is.na(KoCo_BLab$Testing_positive)] <- "Not tested"
+
+KoCo_BLab$PCR_result <- ifelse(KoCo_BLab$Testing_positive == "Yes-1 positive atleast", 1, 0)
+
+table(KoCo_BLab$PCR_result)
+
+freq(KoCo_BLab$PCR_result, w = KoCo_BLab$w_ind_cal)
+
+### Number of ppl tested positive with PCR at the household level
+
+split_hh <- split(KoCo_BLab[, c("hh_id", "roche_u_k", "igg_u_k", "iga_u_k", "w_ind", "w_ind_igg",
+                                "roche_manu_u_k", "igg_manu_u_k", "iga_manu_u_k",
+                                "rf_u_k", "svm_u_k")], KoCo_BLab$hh_id)
+
+
+hh_pcr <- as.list(by(KoCo_BLab, KoCo_BLab$hh_id, function(z){
+  hh_pcr <- sum(z[, "PCR_result"] * z[, "w_ind"])
+}))
+
+hh_pcr <- do.call(c, hh_pcr)
+
+sum(hh_pcr)
+
+hh_pcr <- data.frame(hh_id = names(hh_pcr), hh_pcr = hh_pcr)
+
+###
+# Create a data frame at the hh level with the PCR results,
+# the auxiliary information, the calibrated weights and the ratio
+# of the calibrated weights and the sampling weights g
+###
+
+data_house <- data_house[, setdiff(names(data_house), c("hh_roche_u_k", "hh_igg_u_k", "hh_iga_u_k",
+                                                        "hh_roche_manu_u_k", "hh_igg_manu_u_k", "hh_iga_manu_u_k",
+                                                        "hh_rf_u_k", "hh_svm_u_k",
+                                                        "w_hh_cal_igg",  "g_igg"))]
+
+data_house <- merge(data_house, hh_pcr, by = "hh_id")
+
+
+
+###
+# Run a linear model with the PCR results as response variable and the
+# auxiliary information as covariates including the calibrated weights
+###
+
+
+res.lm <- lm(hh_pcr ~ ., weights = data_house$w_hh_cal,
+             data = data_house[setdiff(colnames(data_house), 
+                                       c("hh_id", "w_hh_cal", "g", "w_household", "w_hh_noshare"))])
+
+
+summary(res.lm)
+
+###
+# Variance estimation
+###
+
+# For the variance estimation, we will not directly use the residuals e_k but the
+# product of e_k and g_k, plus a term to account for the weight sharing
+data_res <- cbind(data_house, e_pcr = res.lm$residuals)
+
+data_res$ge_pcr <- data_res$g * data_res$e_pcr * data_res$w_household / data_res$w_hh_noshare
+
+# Keep useful variables
+data_res <- data_res[, c("hh_id", "ge_pcr", "w_hh_noshare", "w_household")]
+
+
+# Add the constituency ID
+data_res <- merge(data_res, Const, by.x = "hh_id", by.y = "hht_ID")
+
+
+### First term of the variance estimation
+
+# Total number of constituencies
+N_const <- length(unique(Munich_hh$const))
+
+# number of consituencies surveyed
+n_const <- length(unique(Const$const_start))
+
+
+# Calculate the estimated totals of ge at the constituency level
+
+tot_e_const <- as.list(by(data_res, data_res$const_start, function(z){
+  t_e_pcr <- sum(z[, "ge_pcr"] * z[, "w_household"])
+}))
+
+tot_e_const <- do.call(c, tot_e_const)
+
+
+# Calculate the dispersion of ge
+s_e_pcr <- var(tot_e_const)
+
+# First term of the variance estimation
+V1_pcr <- N_const^2 * (1/n_const - 1/N_const) * s_e_pcr
+
+
+### Second term of the variance estimation
+
+# In each constituency, variance of the error terms ge
+s_e_const_pcr <- tapply(data_res$ge_pcr, data_res$const_start, var)
+
+# Add the number of households surveyed and in the population for each constituency
+s_e_const_pcr <- data.frame(hh_id = names(s_e_const_pcr), s_e_pcr = s_e_const_pcr)
+
+# For constituencies with freq==1, tapply(, , var) is giving NA, therefore we replace NA by 0
+s_e_const_pcr[is.na(s_e_const_pcr$s_e_pcr)==T, "s_e_pcr"] <- 0
+
+# Nb hh surveyed
+nb_hh_s <- as.data.frame(table(Const$const_start))
+
+# Merge all the information
+s_e_const <- merge(s_e_const_pcr, nb_hh_s, by.x = "hh_id", by.y = "Var1")
+s_e_const <- merge(s_e_const, Munich_hh, by.x = "hh_id", by.y = "const", all.x = TRUE)
+
+# Second term of the variance estimation
+V2_pcr <- N_const / n_const * sum(s_e_const$Nb_hh^2 * (1/s_e_const$Freq - 1/s_e_const$Nb_hh) * s_e_const$s_e_pcr)
+
+
+###
+# Variance estimation and confidence intervals
+###
+
+tot_pcr <- ceiling(freq(x = KoCo_BLab$PCR_result, w = KoCo_BLab$w_ind_cal, plot=F)[2, 1])
+
+V_pcr <- V1_pcr + V2_pcr
+
+# Upper bound CI
+w_u_ci_pcr <- ceiling(tot_pcr + qnorm(0.975) * sqrt(V_pcr))
+
+# Lower bound CI
+w_l_ci_pcr <- ceiling(tot_pcr - qnorm(0.975) * sqrt(V_pcr))
+
+nb_pcr_est <- c(estimate = tot_pcr, lower_ci = w_l_ci_pcr, upper_ci = w_u_ci_pcr)
+
+
+# Export
+write.csv(nb_pcr_est, here_weights("pcr_pos.csv"), row.names = TRUE)

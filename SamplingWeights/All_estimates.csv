@@ -1,0 +1,45 @@
+"calculation","test","cut_off","adjustment","estimate","lower_ci","upper_ci"
+"weighted","Roche","optimised","unadjusted for spec./sens.",1.89127315269478,1.41363954279712,2.36890676259245
+"weighted","IgG","optimised","unadjusted for spec./sens.",1.88563992783849,1.42459586130115,2.34668399437583
+"weighted","IgA","optimised","unadjusted for spec./sens.",8.48120183916612,7.63813941686944,9.32426426146281
+"weighted","Roche","manufacturer","unadjusted for spec./sens.",1.70601948141453,1.2414550192303,2.17058394359877
+"weighted","IgG","manufacturer","unadjusted for spec./sens.",1.83303078358919,1.36918673067153,2.29687483650686
+"weighted","IgA","manufacturer","unadjusted for spec./sens.",8.37125397688038,7.54436974819351,9.19813820556725
+"weighted","RF","optimized","unadjusted for spec./sens.",1.85775962742025,1.38811290045895,2.32740635438155
+"weighted","SVM","optimized","unadjusted for spec./sens.",1.54487929414026,1.11116645958462,1.9785921286959
+"unweighted","Roche","optimised","unadjusted for spec./sens.",1.75042348955392,1.28068180283879,2.22016517626906
+"unweighted","IgG","optimised","unadjusted for spec./sens.",1.8068887634105,1.32976789527214,2.28400963154887
+"unweighted","IgA","optimised","unadjusted for spec./sens.",8.300395256917,7.31217145101571,9.28861906281828
+"unweighted","Roche","manufacturer","unadjusted for spec./sens.",1.52456239412761,1.08566929310782,1.9634554951474
+"unweighted","IgG","manufacturer","unadjusted for spec./sens.",1.73160173160173,1.26434761382028,2.19885584938318
+"unweighted","IgA","manufacturer","unadjusted for spec./sens.",8.14982119329945,7.16979826531517,9.12984412128374
+"unweighted","RF","optimized","unadjusted for spec./sens.",1.71277997364954,1.24802771721085,2.17753223008823
+"unweighted","SVM","optimized","unadjusted for spec./sens.",1.39281008846226,0.973029418636767,1.81259075828776
+"weighted","Roche","optimised","optimised",1.82479260113726,1.28400253290423,2.3655826693703
+"weighted","IgG","optimised","optimised",0,0,0.141787197006995
+"weighted","IgA","optimised","optimised",1.94875088469754,0.480111153452042,3.41739061594299
+"weighted","Roche","manufacturer","optimised",1.78138599441099,1.23679902228236,2.32597296653965
+"weighted","IgG","manufacturer","optimised",0,0,0.451519104999007
+"weighted","IgA","manufacturer","optimised",2.86116173983135,1.43689115590784,4.28543232375481
+"weighted","RF","optimized","optimised",1.88639252055226,1.35517803467814,2.41760700642637
+"weighted","SVM","optimized","optimised",1.60778366457846,1.09311315958778,2.12245416956913
+"unweighted","Roche","optimised","optimised",1.6653186919271,1.13346407879588,2.19717330505829
+"unweighted","IgG","optimised","optimised",0,0,0.0609754721861953
+"unweighted","IgA","optimised","optimised",1.63378045861879,0,3.35529562324376
+"unweighted","Roche","manufacturer","optimised",1.56867242335511,1.05417877515668,2.08316607155355
+"unweighted","IgG","manufacturer","optimised",0,0,0.321252560535677
+"unweighted","IgA","manufacturer","optimised",2.47975381230145,0.791708763824468,4.16779886077843
+"unweighted","RF","optimized","optimised",1.72240693773276,1.19672855696283,2.24808531850269
+"unweighted","SVM","optimized","optimised",1.42732892899283,0.929191193350862,1.92546666463483
+"weighted","Roche","manufacturer","manufacturer (high sens)",1.51663593294515,1.04879659539808,1.98447527049222
+"weighted","IgG","manufacturer","manufacturer (high sens)",1.14101790895186,0.67390405908513,1.60813175881859
+"weighted","IgA","manufacturer","manufacturer (high sens)",0.834690451169244,0,1.72958680256195
+"unweighted","Roche","manufacturer","manufacturer (high sens)",1.33389969197142,0.891912681880994,1.77588670206184
+"unweighted","IgG","manufacturer","manufacturer (high sens)",1.03887384854152,0.568325895085894,1.50942180199717
+"unweighted","IgA","manufacturer","manufacturer (high sens)",0.59504458149291,0,1.65567545593478
+"weighted","Roche","manufacturer","manufacturer (low sens)",1.76970561858347,1.22380143270305,2.31560980446389
+"weighted","IgG","manufacturer","manufacturer (low sens)",1.30533500413502,0.770952454690707,1.83971755357933
+"weighted","IgA","manufacturer","manufacturer (low sens)",0.917067748965971,0,1.90028324086474
+"unweighted","Roche","manufacturer","manufacturer (low sens)",1.55647754891612,1.04073947486231,2.07221562296992
+"unweighted","IgG","manufacturer","manufacturer (low sens)",1.18848125760568,0.650170062004946,1.72679245320643
+"unweighted","IgA","manufacturer","manufacturer (low sens)",0.653770741140843,0,1.81907743315546
