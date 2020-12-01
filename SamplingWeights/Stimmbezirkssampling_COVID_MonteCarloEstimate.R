@@ -3,11 +3,11 @@
 
 #Load data
 #setwd("E:/COVID-Studie/Stimmbezirke")
-input <- read.table(file="Kopie von Wahlbezirke_2020_Strukturindikatoren_mstatistik.csv", header=T, sep=";")
+input <- read.table(file="Kopie von Wahlbezirke_2020_Strukturindikatoren_mstatistik.csv", header=T, sep=";", fileEncoding = "latin1")
 
 #Select relevant variables...
-input <- input[,c("Gebietsnummer","Anzahl.Einwohner","Anteil.Migrationshintergrund","Anteil.18.24.Jährige",
-                  "Anteil.25.34.Jährige","Anteil.35.44.Jährige","Anteil.45.59.Jährige","Anteil.60.Jährige.und.Ältere",
+input <- input[,c("Gebietsnummer","Anzahl.Einwohner","Anteil.Migrationshintergrund","Anteil.18.24.JÃ¤hrige",
+                  "Anteil.25.34.JÃ¤hrige","Anteil.35.44.JÃ¤hrige","Anteil.45.59.JÃ¤hrige","Anteil.60.JÃ¤hrige.und.Ã„ltere",
                   "Anteil.Einpersonenhaushalten","Anteil.Haushalte.mit.Kindern")]
 #...and rows (of the Stimmbezirke)
 data <- input[c(1:755),]
@@ -23,20 +23,20 @@ gesamt["obereGrenze","Anzahl.Einwohner"] <- round((gesamt["Wert","Anzahl.Einwohn
 gesamt["untereGrenze","Anteil.Migrationshintergrund"] <- round((gesamt["Wert","Anteil.Migrationshintergrund"]-0.1*gesamt["Wert","Anteil.Migrationshintergrund"]),3)
 gesamt["obereGrenze","Anteil.Migrationshintergrund"] <- round((gesamt["Wert","Anteil.Migrationshintergrund"]+0.1*gesamt["Wert","Anteil.Migrationshintergrund"]),3)
 
-gesamt["untereGrenze","Anteil.18.24.Jährige"] <- round((gesamt["Wert","Anteil.18.24.Jährige"]-0.1*gesamt["Wert","Anteil.18.24.Jährige"]),3)
-gesamt["obereGrenze","Anteil.18.24.Jährige"] <- round((gesamt["Wert","Anteil.18.24.Jährige"]+0.1*gesamt["Wert","Anteil.18.24.Jährige"]),3)
+gesamt["untereGrenze","Anteil.18.24.JÃ¤hrige"] <- round((gesamt["Wert","Anteil.18.24.JÃ¤hrige"]-0.1*gesamt["Wert","Anteil.18.24.JÃ¤hrige"]),3)
+gesamt["obereGrenze","Anteil.18.24.JÃ¤hrige"] <- round((gesamt["Wert","Anteil.18.24.JÃ¤hrige"]+0.1*gesamt["Wert","Anteil.18.24.JÃ¤hrige"]),3)
 
-gesamt["untereGrenze","Anteil.25.34.Jährige"] <- round((gesamt["Wert","Anteil.25.34.Jährige"]-0.1*gesamt["Wert","Anteil.25.34.Jährige"]),3)
-gesamt["obereGrenze","Anteil.25.34.Jährige"] <- round((gesamt["Wert","Anteil.25.34.Jährige"]+0.1*gesamt["Wert","Anteil.25.34.Jährige"]),3)
+gesamt["untereGrenze","Anteil.25.34.JÃ¤hrige"] <- round((gesamt["Wert","Anteil.25.34.JÃ¤hrige"]-0.1*gesamt["Wert","Anteil.25.34.JÃ¤hrige"]),3)
+gesamt["obereGrenze","Anteil.25.34.JÃ¤hrige"] <- round((gesamt["Wert","Anteil.25.34.JÃ¤hrige"]+0.1*gesamt["Wert","Anteil.25.34.JÃ¤hrige"]),3)
 
-gesamt["untereGrenze","Anteil.35.44.Jährige"] <- round((gesamt["Wert","Anteil.35.44.Jährige"]-0.1*gesamt["Wert","Anteil.35.44.Jährige"]),3)
-gesamt["obereGrenze","Anteil.35.44.Jährige"] <- round((gesamt["Wert","Anteil.35.44.Jährige"]+0.1*gesamt["Wert","Anteil.35.44.Jährige"]),3)
+gesamt["untereGrenze","Anteil.35.44.JÃ¤hrige"] <- round((gesamt["Wert","Anteil.35.44.JÃ¤hrige"]-0.1*gesamt["Wert","Anteil.35.44.JÃ¤hrige"]),3)
+gesamt["obereGrenze","Anteil.35.44.JÃ¤hrige"] <- round((gesamt["Wert","Anteil.35.44.JÃ¤hrige"]+0.1*gesamt["Wert","Anteil.35.44.JÃ¤hrige"]),3)
 
-gesamt["untereGrenze","Anteil.45.59.Jährige"] <- round((gesamt["Wert","Anteil.45.59.Jährige"]-0.1*gesamt["Wert","Anteil.45.59.Jährige"]),3)
-gesamt["obereGrenze","Anteil.45.59.Jährige"] <- round((gesamt["Wert","Anteil.45.59.Jährige"]+0.1*gesamt["Wert","Anteil.45.59.Jährige"]),3)
+gesamt["untereGrenze","Anteil.45.59.JÃ¤hrige"] <- round((gesamt["Wert","Anteil.45.59.JÃ¤hrige"]-0.1*gesamt["Wert","Anteil.45.59.JÃ¤hrige"]),3)
+gesamt["obereGrenze","Anteil.45.59.JÃ¤hrige"] <- round((gesamt["Wert","Anteil.45.59.JÃ¤hrige"]+0.1*gesamt["Wert","Anteil.45.59.JÃ¤hrige"]),3)
 
-gesamt["untereGrenze","Anteil.60.Jährige.und.Ältere"] <- round((gesamt["Wert","Anteil.60.Jährige.und.Ältere"]-0.1*gesamt["Wert","Anteil.60.Jährige.und.Ältere"]),3)
-gesamt["obereGrenze","Anteil.60.Jährige.und.Ältere"] <- round((gesamt["Wert","Anteil.60.Jährige.und.Ältere"]+0.1*gesamt["Wert","Anteil.60.Jährige.und.Ältere"]),3)
+gesamt["untereGrenze","Anteil.60.JÃ¤hrige.und.Ã„ltere"] <- round((gesamt["Wert","Anteil.60.JÃ¤hrige.und.Ã„ltere"]-0.1*gesamt["Wert","Anteil.60.JÃ¤hrige.und.Ã„ltere"]),3)
+gesamt["obereGrenze","Anteil.60.JÃ¤hrige.und.Ã„ltere"] <- round((gesamt["Wert","Anteil.60.JÃ¤hrige.und.Ã„ltere"]+0.1*gesamt["Wert","Anteil.60.JÃ¤hrige.und.Ã„ltere"]),3)
 
 gesamt["untereGrenze","Anteil.Einpersonenhaushalten"] <- round((gesamt["Wert","Anteil.Einpersonenhaushalten"]-0.1*gesamt["Wert","Anteil.Einpersonenhaushalten"]),3)
 gesamt["obereGrenze","Anteil.Einpersonenhaushalten"] <- round((gesamt["Wert","Anteil.Einpersonenhaushalten"]+0.1*gesamt["Wert","Anteil.Einpersonenhaushalten"]),3)
@@ -59,7 +59,7 @@ sample.stimmbezirke.fun <- function(data,n,seed){
     out_Anzahl.Einwohner <- "Mittelwert von Anzahl.Einwohner liegt im vorgesehenen Bereich."
   }else{
     check_Anzahl.Einwohner <- 0
-    out_Anzahl.Einwohner <- paste0("Mittelwert von Anzahl.Einwohner liegt außerhalb des vorgesehenen Bereiches: ",mean(out$Anzahl.Einwohner))
+    out_Anzahl.Einwohner <- paste0("Mittelwert von Anzahl.Einwohner liegt auÃŸerhalb des vorgesehenen Bereiches: ",mean(out$Anzahl.Einwohner))
   }
   
   if(mean(out$Anteil.Migrationshintergrund)>gesamt["untereGrenze","Anteil.Migrationshintergrund"] & mean(out$Anteil.Migrationshintergrund)<gesamt["obereGrenze","Anteil.Migrationshintergrund"]){
@@ -67,47 +67,47 @@ sample.stimmbezirke.fun <- function(data,n,seed){
     out_Anteil.Migrationshintergrund <- "Mittelwert von Anteil.Migrationshintergrund liegt im vorgesehenen Bereich."
   }else{
     check_Anteil.Migrationshintergrund <- 0
-    out_Anteil.Migrationshintergrund <- paste0("Mittelwert von Anteil.Migrationshintergrund liegt außerhalb des vorgesehenen Bereiches: ",mean(out$Anteil.Migrationshintergrund))
+    out_Anteil.Migrationshintergrund <- paste0("Mittelwert von Anteil.Migrationshintergrund liegt auÃŸerhalb des vorgesehenen Bereiches: ",mean(out$Anteil.Migrationshintergrund))
   }
   
-  if(mean(out$Anteil.18.24.Jährige)>gesamt["untereGrenze","Anteil.18.24.Jährige"] & mean(out$Anteil.18.24.Jährige)<gesamt["obereGrenze","Anteil.18.24.Jährige"]){
-    check_Anteil.18.24.Jährige <- 1
-    out_Anteil.18.24.Jährige <- "Mittelwert von Anteil.18.24.Jährige liegt im vorgesehenen Bereich."
+  if(mean(out$Anteil.18.24.JÃ¤hrige)>gesamt["untereGrenze","Anteil.18.24.JÃ¤hrige"] & mean(out$Anteil.18.24.JÃ¤hrige)<gesamt["obereGrenze","Anteil.18.24.JÃ¤hrige"]){
+    check_Anteil.18.24.JÃ¤hrige <- 1
+    out_Anteil.18.24.JÃ¤hrige <- "Mittelwert von Anteil.18.24.JÃ¤hrige liegt im vorgesehenen Bereich."
   }else{
-    check_Anteil.18.24.Jährige <- 0
-    out_Anteil.18.24.Jährige <- paste0("Mittelwert von Anteil.18.24.Jährige liegt außerhalb des vorgesehenen Bereiches: ",mean(out$Anteil.18.24.Jährige))
+    check_Anteil.18.24.JÃ¤hrige <- 0
+    out_Anteil.18.24.JÃ¤hrige <- paste0("Mittelwert von Anteil.18.24.JÃ¤hrige liegt auÃŸerhalb des vorgesehenen Bereiches: ",mean(out$Anteil.18.24.JÃ¤hrige))
   }
   
-  if(mean(out$Anteil.25.34.Jährige)>gesamt["untereGrenze","Anteil.25.34.Jährige"] & mean(out$Anteil.25.34.Jährige)<gesamt["obereGrenze","Anteil.25.34.Jährige"]){
-    check_Anteil.25.34.Jährige <- 1
-    out_Anteil.25.34.Jährige <- "Mittelwert von Anteil.25.34.Jährige liegt im vorgesehenen Bereich."
+  if(mean(out$Anteil.25.34.JÃ¤hrige)>gesamt["untereGrenze","Anteil.25.34.JÃ¤hrige"] & mean(out$Anteil.25.34.JÃ¤hrige)<gesamt["obereGrenze","Anteil.25.34.JÃ¤hrige"]){
+    check_Anteil.25.34.JÃ¤hrige <- 1
+    out_Anteil.25.34.JÃ¤hrige <- "Mittelwert von Anteil.25.34.JÃ¤hrige liegt im vorgesehenen Bereich."
   }else{
-    check_Anteil.25.34.Jährige <- 0
-    out_Anteil.25.34.Jährige <- paste0("Mittelwert von Anteil.25.34.Jährige liegt außerhalb des vorgesehenen Bereiches: ",mean(out$Anteil.25.34.Jährige))
+    check_Anteil.25.34.JÃ¤hrige <- 0
+    out_Anteil.25.34.JÃ¤hrige <- paste0("Mittelwert von Anteil.25.34.JÃ¤hrige liegt auÃŸerhalb des vorgesehenen Bereiches: ",mean(out$Anteil.25.34.JÃ¤hrige))
   }
   
-  if(mean(out$Anteil.35.44.Jährige)>gesamt["untereGrenze","Anteil.35.44.Jährige"] & mean(out$Anteil.35.44.Jährige)<gesamt["obereGrenze","Anteil.35.44.Jährige"]){
-    check_Anteil.35.44.Jährige <- 1
-    out_Anteil.35.44.Jährige <- "Mittelwert von Anteil.35.44.Jährige liegt im vorgesehenen Bereich."
+  if(mean(out$Anteil.35.44.JÃ¤hrige)>gesamt["untereGrenze","Anteil.35.44.JÃ¤hrige"] & mean(out$Anteil.35.44.JÃ¤hrige)<gesamt["obereGrenze","Anteil.35.44.JÃ¤hrige"]){
+    check_Anteil.35.44.JÃ¤hrige <- 1
+    out_Anteil.35.44.JÃ¤hrige <- "Mittelwert von Anteil.35.44.JÃ¤hrige liegt im vorgesehenen Bereich."
   }else{
-    check_Anteil.35.44.Jährige <- 0
-    out_Anteil.35.44.Jährige <- paste0("Mittelwert von Anteil.35.44.Jährige liegt außerhalb des vorgesehenen Bereiches: ",mean(out$Anteil.35.44.Jährige))
+    check_Anteil.35.44.JÃ¤hrige <- 0
+    out_Anteil.35.44.JÃ¤hrige <- paste0("Mittelwert von Anteil.35.44.JÃ¤hrige liegt auÃŸerhalb des vorgesehenen Bereiches: ",mean(out$Anteil.35.44.JÃ¤hrige))
   }
   
-  if(mean(out$Anteil.45.59.Jährige)>gesamt["untereGrenze","Anteil.45.59.Jährige"] & mean(out$Anteil.45.59.Jährige)<gesamt["obereGrenze","Anteil.45.59.Jährige"]){
-    check_Anteil.45.59.Jährige <- 1
-    out_Anteil.45.59.Jährige <- "Mittelwert von Anteil.45.59.Jährige liegt im vorgesehenen Bereich."
+  if(mean(out$Anteil.45.59.JÃ¤hrige)>gesamt["untereGrenze","Anteil.45.59.JÃ¤hrige"] & mean(out$Anteil.45.59.JÃ¤hrige)<gesamt["obereGrenze","Anteil.45.59.JÃ¤hrige"]){
+    check_Anteil.45.59.JÃ¤hrige <- 1
+    out_Anteil.45.59.JÃ¤hrige <- "Mittelwert von Anteil.45.59.JÃ¤hrige liegt im vorgesehenen Bereich."
   }else{
-    check_Anteil.45.59.Jährige <- 0
-    out_Anteil.45.59.Jährige <- paste0("Mittelwert von Anteil.45.59.Jährige liegt außerhalb des vorgesehenen Bereiches: ",mean(out$Anteil.45.59.Jährige))
+    check_Anteil.45.59.JÃ¤hrige <- 0
+    out_Anteil.45.59.JÃ¤hrige <- paste0("Mittelwert von Anteil.45.59.JÃ¤hrige liegt auÃŸerhalb des vorgesehenen Bereiches: ",mean(out$Anteil.45.59.JÃ¤hrige))
   }
   
-  if(mean(out$Anteil.60.Jährige.und.Ältere)>gesamt["untereGrenze","Anteil.60.Jährige.und.Ältere"] & mean(out$Anteil.60.Jährige.und.Ältere)<gesamt["obereGrenze","Anteil.60.Jährige.und.Ältere"]){
-    check_Anteil.60.Jährige.und.Ältere <- 1
-    out_Anteil.60.Jährige.und.Ältere <- "Mittelwert von Anteil.60.Jährige.und.Ältere liegt im vorgesehenen Bereich."
+  if(mean(out$Anteil.60.JÃ¤hrige.und.Ã„ltere)>gesamt["untereGrenze","Anteil.60.JÃ¤hrige.und.Ã„ltere"] & mean(out$Anteil.60.JÃ¤hrige.und.Ã„ltere)<gesamt["obereGrenze","Anteil.60.JÃ¤hrige.und.Ã„ltere"]){
+    check_Anteil.60.JÃ¤hrige.und.Ã„ltere <- 1
+    out_Anteil.60.JÃ¤hrige.und.Ã„ltere <- "Mittelwert von Anteil.60.JÃ¤hrige.und.Ã„ltere liegt im vorgesehenen Bereich."
   }else{
-    check_Anteil.60.Jährige.und.Ältere <- 0
-    out_Anteil.60.Jährige.und.Ältere <- paste0("Mittelwert von Anteil.60.Jährige.und.Ältere liegt außerhalb des vorgesehenen Bereiches: ",mean(out$Anteil.60.Jährige.und.Ältere))
+    check_Anteil.60.JÃ¤hrige.und.Ã„ltere <- 0
+    out_Anteil.60.JÃ¤hrige.und.Ã„ltere <- paste0("Mittelwert von Anteil.60.JÃ¤hrige.und.Ã„ltere liegt auÃŸerhalb des vorgesehenen Bereiches: ",mean(out$Anteil.60.JÃ¤hrige.und.Ã„ltere))
   }
   
   if(mean(out$Anteil.Einpersonenhaushalten)>gesamt["untereGrenze","Anteil.Einpersonenhaushalten"] & mean(out$Anteil.Einpersonenhaushalten)<gesamt["obereGrenze","Anteil.Einpersonenhaushalten"]){
@@ -115,7 +115,7 @@ sample.stimmbezirke.fun <- function(data,n,seed){
     out_Anteil.Einpersonenhaushalten <- "Mittelwert von Anteil.Einpersonenhaushalten liegt im vorgesehenen Bereich."
   }else{
     check_Anteil.Einpersonenhaushalten <- 0
-    out_Anteil.Einpersonenhaushalten <- paste0("Mittelwert von Anteil.Einpersonenhaushalten liegt außerhalb des vorgesehenen Bereiches: ",mean(out$Anteil.Einpersonenhaushalten))
+    out_Anteil.Einpersonenhaushalten <- paste0("Mittelwert von Anteil.Einpersonenhaushalten liegt auÃŸerhalb des vorgesehenen Bereiches: ",mean(out$Anteil.Einpersonenhaushalten))
   }
   
   if(mean(out$Anteil.Haushalte.mit.Kindern)>gesamt["untereGrenze","Anteil.Haushalte.mit.Kindern"] & mean(out$Anteil.Haushalte.mit.Kindern)<gesamt["obereGrenze","Anteil.Haushalte.mit.Kindern"]){
@@ -123,19 +123,19 @@ sample.stimmbezirke.fun <- function(data,n,seed){
     out_Anteil.Haushalte.mit.Kindern <- "Mittelwert von Anteil.Haushalte.mit.Kindern liegt im vorgesehenen Bereich."
   }else{
     check_Anteil.Haushalte.mit.Kindern <- 0
-    out_Anteil.Haushalte.mit.Kindern <- paste0("Mittelwert von Anteil.Haushalte.mit.Kindern liegt außerhalb des vorgesehenen Bereiches: ",mean(out$Anteil.Haushalte.mit.Kindern))
+    out_Anteil.Haushalte.mit.Kindern <- paste0("Mittelwert von Anteil.Haushalte.mit.Kindern liegt auÃŸerhalb des vorgesehenen Bereiches: ",mean(out$Anteil.Haushalte.mit.Kindern))
   }
   
   #if all means are fine, return selection
-  if(check_Anzahl.Einwohner==1 | check_Anteil.Migrationshintergrund==1 & check_Anteil.18.24.Jährige==1 & check_Anteil.25.34.Jährige==1 & 
-     check_Anteil.35.44.Jährige==1 & check_Anteil.45.59.Jährige==1 & check_Anteil.60.Jährige.und.Ältere==1 & 
+  if(check_Anzahl.Einwohner==1 | check_Anteil.Migrationshintergrund==1 & check_Anteil.18.24.JÃ¤hrige==1 & check_Anteil.25.34.JÃ¤hrige==1 & 
+     check_Anteil.35.44.JÃ¤hrige==1 & check_Anteil.45.59.JÃ¤hrige==1 & check_Anteil.60.JÃ¤hrige.und.Ã„ltere==1 & 
      check_Anteil.Einpersonenhaushalten==1 & check_Anteil.Haushalte.mit.Kindern==1){
-    return(list(out,list(out_Anzahl.Einwohner,out_Anteil.Migrationshintergrund,out_Anteil.18.24.Jährige,out_Anteil.25.34.Jährige,
-                         out_Anteil.35.44.Jährige,out_Anteil.45.59.Jährige,out_Anteil.60.Jährige.und.Ältere,
+    return(list(out,list(out_Anzahl.Einwohner,out_Anteil.Migrationshintergrund,out_Anteil.18.24.JÃ¤hrige,out_Anteil.25.34.JÃ¤hrige,
+                         out_Anteil.35.44.JÃ¤hrige,out_Anteil.45.59.JÃ¤hrige,out_Anteil.60.JÃ¤hrige.und.Ã„ltere,
                          out_Anteil.Einpersonenhaushalten,out_Anteil.Haushalte.mit.Kindern)))
   }else{
-    return(list("Try again",list(out_Anzahl.Einwohner,out_Anteil.Migrationshintergrund,out_Anteil.18.24.Jährige,out_Anteil.25.34.Jährige,
-                         out_Anteil.35.44.Jährige,out_Anteil.45.59.Jährige,out_Anteil.60.Jährige.und.Ältere,
+    return(list("Try again",list(out_Anzahl.Einwohner,out_Anteil.Migrationshintergrund,out_Anteil.18.24.JÃ¤hrige,out_Anteil.25.34.JÃ¤hrige,
+                         out_Anteil.35.44.JÃ¤hrige,out_Anteil.45.59.JÃ¤hrige,out_Anteil.60.JÃ¤hrige.und.Ã„ltere,
                          out_Anteil.Einpersonenhaushalten,out_Anteil.Haushalte.mit.Kindern)))
   }
 }
@@ -206,3 +206,9 @@ estimate.cons <- function(iterations){
 #run the monte carlo estimate with 5000 samples
 estimate <- estimate.cons(5000)
 
+library(dplyr)
+sampling.prob.mc <- estimate %>%
+  as_tibble() %>%
+  rename(Constituency_ID = Con_ID,
+         Sampling_Probabilities = Column_2)
+save(sampling.prob.mc, file="MC-Estimation-Sampling-Probabilities.RData")
