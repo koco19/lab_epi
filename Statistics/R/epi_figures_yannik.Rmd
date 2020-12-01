@@ -136,17 +136,17 @@ koco_week[c("NewCases_rel_lci", "NewCases_rel_uci")] =
                        conf.level = 0.95)[c("lower", "upper")]
 
 # Get prevalence estimate with CI
-roche_sero_estimates = read.csv(
-  here_koco("Analysis Data Sets", "Roche_sero_estimates.csv"))
-rownames(roche_sero_estimates) =
-  paste(roche_sero_estimates[,"group1"],
-        roche_sero_estimates[,"group2"], sep=" & ")
-prev_adj_wei_estimate =
-  roche_sero_estimates["Sampling Weighted & Adjusted", "ppest"] / 100
-prev_adj_wei_lci =
-  roche_sero_estimates["Sampling Weighted & Adjusted", "pplci"] / 100
-prev_adj_wei_uci =
-  roche_sero_estimates["Sampling Weighted & Adjusted", "ppuci"] / 100
+
+here_weights = function (...) here::here("SamplingWeights", ...)
+# Prevalence estimates
+estimates <- read.csv(here_weights("All_estimates.csv"))
+vals = estimates[(estimates$calculation=="weighted") &
+                 (estimates$test=="Roche") &
+                 (estimates$cut_off=="optimised") &
+                 (estimates$adjustment=="optimised"),]
+prev_adj_wei_estimate = vals$estimate / 100
+prev_adj_wei_lci = vals$lower_ci / 100
+prev_adj_wei_uci = vals$upper_ci / 100
 
 # Icons
 here_images = function (...) here::here("Icons", ...)
@@ -192,10 +192,10 @@ plt_koco_weeklyfrac = ggplot(data=koco_week, aes(x=Date, y=NewCases_rel)) +
   geom_rect(
     ymin=prev_adj_wei_lci, ymax=prev_adj_wei_uci,
     xmin=min(koco_week$Date), xmax=max(koco_week$Date),
-    fill="grey30", alpha=0.01) +
+    fill="grey90") +
   geom_segment(
     y = prev_adj_wei_estimate, yend = prev_adj_wei_estimate,
-    x=min(koco_week$Date), xend=max(koco_week$Date), col="grey30") +
+    x=min(koco_week$Date), xend=max(koco_week$Date)) +
   geom_line(col=col_koco) + geom_point(col=col_koco) +
   geom_line(aes(y=NewCases_rel_lci), col=col_koco, linetype="dashed") +
   geom_line(aes(y=NewCases_rel_uci), col=col_koco, linetype="dashed") +
@@ -215,7 +215,6 @@ ggsave(here_out("koco_weeklyfrac.pdf"), width=3.5, height=2.5, dpi=720,
 ## New cases
 
 ```{r, fig.width=3.5, fig.height=2.5}
-
 plt_muc_weeklycases = ggplot(data=muc_week, aes(x=Date, y=NewCasesGE14)) +
   geom_line(col=col_muc) + geom_point(col=col_muc) +
   #scale_x_date(limits = date_range, labels = scales::date_format("%b %d"))
@@ -295,6 +294,154 @@ ggsave(here_out("prevalence.png"), width=2.5, height=3.5, dpi=720)
 ggsave(here_out("prevalence.pdf"), width=2.5, height=3.5, dpi=720,
        device=cairo_pdf)
 ```
+
+## Underreporting
+
+```{r, fig.width=4, fig.height=3}
+here_weights = function (...) here::here("SamplingWeights", ...)
+
+# Prevalence estimates
+estimates = read.csv(here_weights("All_estimates.csv"))
+
+# Number of estimated cases
+nb_est_cases = muc_pop_size * estimates[
+  estimates$test == "Roche" & estimates$calculation == "weighted" &
+  estimates$cut_off == "optimised" & estimates$adjustment == "optimised",
+  c("estimate", "lower_ci", "upper_ci")] / 100
+
+# Number of officially registered cases
+n_cases = 6293
+
+# Number of reported cases in private households ranging
+#  from 1259 (20%) to 6293 (100%)
+data_pcr = data.frame(
+  nb_rep_cases = seq(n_cases*0.2, n_cases, length.out=100))
+data_pcr$pct_rep_cases = data_pcr$nb_rep_cases / n_cases * 100
+
+data_pcr$estimate = nb_est_cases$estimate / data_pcr$nb_rep_cases
+data_pcr$lower_ci = nb_est_cases$lower_ci / data_pcr$nb_rep_cases
+data_pcr$upper_ci = nb_est_cases$upper_ci / data_pcr$nb_rep_cases
+
+# RKI: 87.3361932% of reported cases in private households
+pct_rki_cases = 87.3361932
+under_rep_fact_rki = nb_est_cases / (n_cases * pct_rki_cases / 100)
+
+# 100 privates
+pct_100_cases = 100
+under_rep_fact_100 = nb_est_cases / n_cases
+
+col_rki = "grey40"
+
+add_big_annotation = function (plt, pct, under_rep, label, x, y) {
+  plt +
+    # Type label
+    geom_text(data=onesie,
+              x=pct, y=y, label=label, size=3, color=col_rki, hjust=0.6) +
+    #  horizontal line
+    geom_segment(data=onesie,
+                 aes(x=x+6, y=under_rep$estimate,
+                     xend=pct, yend=under_rep$estimate),
+                 linetype="dotted", color=col_rki) +
+    #  vertical line
+    geom_segment(data=onesie,
+                 aes(x=pct, xend=pct,
+                     y=under_rep$estimate, yend=y-1),
+                 linetype="dotted", color=col_rki) +
+    #  numbers
+    geom_text(data=onesie, x=x, y=under_rep$estimate, size=3,
+              color=col_rki, hjust=0.5, vjust=-0.05,
+              label=sprintf("%.1f", under_rep$estimate)) +
+    geom_text(data=onesie, x=x, y=under_rep$estimate, size=3,
+            color=col_rki, hjust=0.5, vjust=1.05,
+            label=sprintf("[%.1f; %.1f]",
+                          under_rep$lower_ci, under_rep$upper_ci))
+}
+
+# Dummy data for drawing things only once
+onesie = data.frame(hohoho=1)
+
+plt_hidden = ggplot(data=data_pcr, mapping=aes(x=pct_rep_cases)) +
+  # CI area
+  geom_ribbon(aes(ymin=lower_ci, ymax=upper_ci), fill="grey90") +
+  # Estimate curve
+  geom_line(aes(y=estimate)) +
+  # y axis limits
+  #scale_y_continuous(limits=c(1, max(data_pcr$upper_ci)+1)) +
+  # Labels
+  labs(x="Cases in private households [%]", y="Underreporting factor")
+
+plt_hidden = add_big_annotation(
+  plt_hidden, pct_rki_cases, under_rep_fact_rki,
+  sprintf("RKI: %.0f%%", pct_rki_cases), 30, 12)
+plt_hidden = add_big_annotation(
+  plt_hidden, pct_100_cases, under_rep_fact_100, "100%", 45, 10)
+
+plt_hidden
+```
+
+## Infection fatality rate
+
+```{r, fig.width=3.5, fig.height=2.5}
+# Reference number of deaths
+n_deaths = 216
+
+# Number of deaths in private households ranging from 43 (20%) to 216 (100%)
+data_deaths = data.frame(
+  nb_rep_deaths = seq(n_deaths*0.2, n_deaths, length.out = 100))
+
+data_deaths$pct_rep_deaths = data_deaths$nb_rep_deaths/n_deaths*100
+
+data_deaths$estimate = data_deaths$nb_rep_deaths / nb_est_cases$estimate * 100
+data_deaths$upper_ci = data_deaths$nb_rep_deaths / nb_est_cases$lower_ci * 100
+data_deaths$lower_ci = data_deaths$nb_rep_deaths / nb_est_cases$upper_ci * 100
+
+add_big_annotation = function (plt, pct, estimates, label, x, y) {
+  plt +
+    # RKI values
+    geom_text(data=onesie,
+              x=pct, y=y, label=label, size=3, color=col_rki, hjust=0.6) +
+    #  horizontal line
+    geom_segment(data=onesie,
+                 aes(x=pct, xend=x+8,
+                     y=estimates$estimate, yend=estimates$estimate),
+                 linetype="dotted", color=col_rki) +
+    #  vertical line
+    geom_segment(data=onesie,
+                 aes(x=pct, xend=pct,
+                     y=estimates$estimate, yend=y+0.05),
+                 linetype="dotted", color=col_rki) +
+    #  numbers
+    geom_text(data=onesie, x=x, y=estimates$estimate, size=3,
+              color=col_rki, hjust=0.5, vjust=-0.05,
+              label=sprintf("%.2f%%", estimates$estimate)) +
+    geom_text(data=onesie, x=x, y=estimates$estimate, size=3,
+              color=col_rki, hjust=0.5, vjust=1.05,
+              label=sprintf(
+                "[%.2f; %.2f]",estimates$upper_ci, estimates$lower_ci))
+}
+
+
+# RKI: 53.9184112% of deaths in private households
+pct_rki_deaths = 53.9184112
+IFR_rki = (n_deaths*pct_rki_deaths/100) / nb_est_cases * 100
+
+# 100% privates
+IFR_100 = n_deaths / nb_est_cases * 100
+
+plt_ifr = ggplot(data=data_deaths, mapping=aes(x=pct_rep_deaths)) +
+  # CI area
+  geom_ribbon(aes(ymin=lower_ci, ymax=upper_ci), fill="grey90") + 
+  # Estimate curve
+  geom_line(aes(y=estimate)) +
+  labs(x="Deaths in private households [%]", y="Infection fatality ratio [%]")
+
+plt_ifr = add_big_annotation(
+  plt_ifr, pct_rki_deaths, IFR_rki,
+  sprintf("RKI: %.0f%%", pct_rki_deaths), 26, 0.14)
+plt_ifr = add_big_annotation(plt_ifr, 100, IFR_100, "100%", 26, 0.14)
+plt_ifr
+```
+
 
 ## Combined
 
@@ -382,7 +529,7 @@ plt_deaths = ggplot(mort_data_long,
                col_green, col_yellow)) +
   labs(x="", y="Deaths per week") +
   theme(legend.title=element_blank(),
-        legend.position=c(0.5, 0.2),
+        legend.position=c(0.5, 0.3),
         legend.direction = "horizontal",
         axis.title.x = element_blank())
 plt_deaths
@@ -495,22 +642,56 @@ plt1 =
   ggplot() + annotation_custom(g_coronavirus) + theme_minimal() +
   plt_muc_weeklycases + labs(tag = "A") +
   plt_muc_weeklycumu + labs(tag = "B") +
+  plt_hidden + labs(tag = "C") +
   ggplot() + annotation_custom(g_antibody) + theme_minimal() +
-  plt_koco_weeklyrecruits + labs(tag = "C") +
-  plt_koco_weeklyfrac + labs(tag = "D") +
-  plt_prevalence + labs(tag = "E") +
+  plt_koco_weeklyrecruits + labs(tag = "D") +
+  plt_koco_weeklyfrac + labs(tag = "E") +
+  plt_ifr + labs(tag = "F") +
   ggdraw() + draw_label(
     "Excess mortality vs. SARS-CoV-2 associated deaths", x=0, hjust=0,
     fontface="bold") +
   ggplot() + annotation_custom(g_book) + theme_minimal() +
-  plt_deaths + labs(tag = "F") + plt_excess + labs(tag = "G") +
-  plt_total_deaths + labs(tag = "H") +
-  plot_layout(widths = c(0.9, 5, 5, 4),
-              heights = c(0.35, 1, 1, 1, 1, 0.1, 0.35, 2.5),
-              design = "AAAA\nBCD#\nBCDH\nEFGH\nEFG#\n####\nIIII\nJKLM")
+  plt_deaths + labs(tag = "G") + plt_excess + labs(tag = "H") +
+  plt_total_deaths + labs(tag = "I") +
+  plot_layout(widths = c(0.5, 5, 5, 5),
+              heights = c(0.2, 1, 1, 0.2, 1),
+              design = "#AAA\nBCDE\nFGHI\n#JJJ\nKLMN")
+              #design = "AAAA\nBCD#\nBCDH\nEFGH\nEFG#\n####\nIIII\nJKLM")
+plt1
+#ggsave(here_out("Fig_simple_cases_and_deaths.png"),
+#       width=12, height=7.5, dpi=400)
+#ggsave(here_out("Fig_simple_cases_and_deaths.pdf"),
+#       width=12, height=7.5, dpi=720, device=cairo_pdf)
+```
+
+```{r, fig.width=12, fig.height=9}
+mg=0.5
+
+library(patchwork)
+
+plt1 =
+  ggdraw() + draw_label(
+    "Virus vs. antibody positivity", x=0, hjust=0) +
+  ggplot() + annotation_custom(g_coronavirus) + theme_minimal() +
+  ggplot() + annotation_custom(g_antibody) + theme_minimal() +
+  plt_muc_weeklycases + labs(tag = "A") +
+  plt_koco_weeklyrecruits + labs(tag = "B") +
+  plt_hidden + labs(tag = "C") +
+  plt_muc_weeklycumu + labs(tag = "D") +
+  plt_koco_weeklyfrac + labs(tag = "E") +
+  plt_ifr + labs(tag = "F") +
+  ggdraw() + draw_label(
+    "Excess mortality vs. SARS-CoV-2 associated deaths", x=0, hjust=0) +
+  plt_deaths + labs(tag = "G") +
+  plt_excess + labs(tag = "H") +
+  plt_total_deaths + labs(tag = "I") +
+  plot_layout(widths = c(5, 5, 5),
+              heights = c(0.2, 0.15, 1, 1, 0.2, 1),
+              design = "AAA\nBC#\nDEF\nGHI\nJJJ\nKLM")
+              #design = "AAAA\nBCD#\nBCDH\nEFGH\nEFG#\n####\nIIII\nJKLM")
 plt1
 ggsave(here_out("Fig_simple_cases_and_deaths.png"),
-       width=12, height=7.5, dpi=400)
+       width=12, height=9, dpi=400)
 ggsave(here_out("Fig_simple_cases_and_deaths.pdf"),
-       width=12, height=7.5, dpi=720, device=cairo_pdf)
+       width=12, height=9, dpi=720, device=cairo_pdf)
 ```
