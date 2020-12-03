@@ -349,10 +349,10 @@ add_big_annotation = function (plt, pct, under_rep, label, x, y) {
                  linetype="dotted", color=col_rki) +
     #  numbers
     geom_text(data=onesie, x=x, y=under_rep$estimate, size=3,
-              color=col_rki, hjust=0.5, vjust=-0.05,
+              color=col_rki, hjust=0.5, vjust=-0.15,
               label=sprintf("%.1f", under_rep$estimate)) +
     geom_text(data=onesie, x=x, y=under_rep$estimate, size=3,
-            color=col_rki, hjust=0.5, vjust=1.05,
+            color=col_rki, hjust=0.5, vjust=1.15,
             label=sprintf("[%.1f; %.1f]",
                           under_rep$lower_ci, under_rep$upper_ci))
 }
@@ -412,10 +412,10 @@ add_big_annotation = function (plt, pct, estimates, label, x, y) {
                  linetype="dotted", color=col_rki) +
     #  numbers
     geom_text(data=onesie, x=x, y=estimates$estimate, size=3,
-              color=col_rki, hjust=0.5, vjust=-0.05,
+              color=col_rki, hjust=0.5, vjust=-0.15,
               label=sprintf("%.2f%%", estimates$estimate)) +
     geom_text(data=onesie, x=x, y=estimates$estimate, size=3,
-              color=col_rki, hjust=0.5, vjust=1.05,
+              color=col_rki, hjust=0.5, vjust=1.15,
               label=sprintf(
                 "[%.2f; %.2f]",estimates$upper_ci, estimates$lower_ci))
 }
