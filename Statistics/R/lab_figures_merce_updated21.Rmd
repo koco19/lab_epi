@@ -1,0 +1,2565 @@
+---
+title: "Lab Paper 2nd part (updated plots for 2021)"
+author: "Mercè Garí"
+output:
+  html_document:
+    df_print: paged
+    dev: png
+  pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+Compilation date: `r format(Sys.time(), '%d.%m.%Y')`
+
+# Prepare
+
+```{r}
+here_r = function (...) here::here("Statistics", "R", ...)
+here_lab_data = function (...) here::here("Lab_paper2_data", ...)
+here_out = function (...) here::here(
+  "Lab_paper2_output", "lab_figures_merce_updated21", ...)
+
+# Create output folder if inexistent
+dir.create(here_out(), showWarnings = FALSE)
+
+library(magrittr)
+library(ggplot2)
+library(grid)
+
+# Load settings
+source(here_r("setup.R"))
+source(here_r("functions.R"))
+
+library(dplyr)
+source(here_r("RainCloudPlots", "R_rainclouds.R"))
+
+
+# Load data
+#  Single data contains only one blood sample per participant
+single_data = read.csv(here_lab_data(
+  "Global_Data/New_NT_category", "Final_Lab_Single_20200904_NT.csv"), stringsAsFactors = F)
+
+# Assertions
+if (length(unique(single_data$blut_ID)) != nrow(single_data)) {stop("Blood id not unique")}
+if (length(unique(single_data$tln_ID)) != nrow(single_data)) {stop("Participant id not unique")}
+
+###############################################################################
+# Clean data
+
+data = single_data
+
+#  Unique labels
+data[data=="Positiv" | data=="pos." | data=="reactive" | 
+       data=="positive"] = "Positive"
+data[data=="Negativ" | data=="Indeterminate" | 
+       data=="neg." | data=="ind." | 
+       data=="nonreactive" | data=="negative" | 
+       data=="not_reactive"] = "Negative"
+
+#  Remove Roche 0 values
+val_cols = grep("roche_COI", colnames(data), value=T)
+res_cols = grep("roche_Interpretation", colnames(data), value=T)
+cat("# Roche == 0 before removal:", sum(data[,val_cols]==0, na.rm=T), "\n")
+
+for (j in 1:length(val_cols)) {
+  # Conveniently, the order is the same
+  val_col = val_cols[[j]]
+  res_col = res_cols[[j]]
+  data[data[,val_col]==0 & !is.na(data[,val_col]), res_col] = NA
+  data[data[,val_col]==0 & !is.na(data[,val_col]), val_col] = NA
+}
+
+#  Add binary ground truth column
+data['Ground truth'] = ifelse(is.na(data$model_outcome), "Unknown", 
+                              ifelse(data$model_outcome=="true_positive",
+                                     "True-positive",
+                                     "True-negative"))
+data$`Ground truth` = factor(as.character(data$`Ground truth`),
+                             levels = c("Unknown", "True-negative", 
+                                        "True-positive"))
+
+#  NT to categories with correct ordering
+data$NT = factor(as.character(data$NT), 
+                 levels = c("<5", "1:5", "10", "20", "40", ">80"))
+
+# TODO currently is 4.75, which is bad when setting manually <10 -> 5
+cutoff$new$NT = 5
+
+###############################################################################
+# Check data consistency
+
+#' Check consistency of reported values according to assumed thresholds
+check_consistency = function(val_cols, res_cols, threshold) {
+  for (j in 1:length(val_cols)) {
+    # Assuming that value and result columns have the same order
+    val_col = val_cols[[j]]
+    res_col = res_cols[[j]]
+    by_value = sum(data[,val_col]>=threshold, na.rm=T)
+    by_cat = sum(data[,res_col] == "Positive", na.rm=T)
+    if (by_value != by_cat) { stop(paste("Mismatch positives (exp./act.)", by_value, by_cat)) }
+    by_value = sum(data[,val_col]<threshold, na.rm=T)
+    by_cat = sum(data[,res_col] == "Negative", na.rm=T)
+    if (by_value != by_cat) { stop(paste("Mismatch negatives (exp./act.)", by_value, by_cat)) }
+  }
+}
+
+#  Roche
+val_cols = grep("roche_COI", colnames(data), value=T)
+res_cols = grep("roche_Interpretation", colnames(data), value=T)
+check_consistency(val_cols, res_cols, 1.0)
+if (any(data[,val_cols]==0, na.rm=T)) {stop("There are Roche zero values.")}
+
+#  Euroimmun
+val_cols = grep("eur_quotient", colnames(data), value=T)
+res_cols = grep("eur_der_test_result", colnames(data), value=T)
+check_consistency(val_cols, res_cols, 1.1)
+if (any(data[,val_cols]==0, na.rm=T)) {stop("There are Euroimmun zero values.")}
+
+# Use corrected data frame
+single_data = data
+
+# Tidy up
+rm(data, val_cols, res_cols, val_col, res_col, j)
+
+#' Create a plot with the `title` string above the `plt` plot row.
+title_plot = function(title, plt, plot.margin=margin(0,0,0,7), rel_heights=c(0.1,1)) {
+  plot_grid(
+    ggdraw() + draw_label(title, fontface='bold', x=0, hjust=0) + theme(plot.margin = plot.margin),
+    plt, ncol=1, rel_heights=rel_heights
+  )
+}
+
+```
+
+```{r setup, include=FALSE}
+library(dplyr)
+library(tidyr)
+library(ggpmisc)
+library(stringr)
+library(GGally)
+library(cowplot)
+library(forcats)
+
+lab <- extract_last_values(single_data) %>%
+  as_tibble() %>%
+  rename(IgA = Eur_IgA, IgG = Eur_IgG,
+         cPass = cPass,
+         NT.bin = NT_result, cPass.bin = cPass_result,
+         Cohort = study_per_ID) %>%
+  mutate(IgA.bin = ifelse(IgA < 1.1, "Negative", "Positive"),
+         IgG.bin = ifelse(IgG < 1.1, "Negative", "Positive"),
+         Roche.bin = ifelse(Roche < 1, "Negative", "Positive"),
+         IgA.bin = as.factor(IgA.bin),
+         IgG.bin = as.factor(IgG.bin),
+         Roche.bin = as.factor(Roche.bin),
+         NT = factor(as.character(NT), 
+                     levels = c("<5", "1:5", "10", "20", "40", ">80"))) %>%
+  rename(`Previous PCR Test` = PCR_Ergebnis)
+
+lab.array <- lab %>%
+  select(tln_ID, blut_ID, 
+         VC_S1_IgA, VC_S2_IgA, VC_N_IgA,
+         VC_S1_IgG, VC_S2_IgG, VC_N_IgG,
+         VC_S1_IgM, VC_S2_IgM, VC_N_IgM) %>%
+  gather(array, value, -c(tln_ID, blut_ID)) %>%
+    mutate(value = ifelse(value == "<10", "5", value),
+           value = as.numeric(value)) %>%
+  spread(array, value)
+
+lab <- lab %>%
+  select(-c(VC_S1_IgA, VC_S2_IgA, VC_N_IgA,
+         VC_S1_IgG, VC_S2_IgG, VC_N_IgG,
+         VC_S1_IgM, VC_S2_IgM, VC_N_IgM)) %>%
+  left_join(lab.array)
+
+
+lab.lineblot <- lab %>%
+  select(tln_ID, blut_ID,
+         LineBlot_NP_SARS_2, LineBlot_RBD_SARS_2,
+         LineBlot_S1_SARS_2, 
+         Schnupfen_NP_229E, Schnupfen_NP_NL63, 
+         Schnupfen_NP_OC43, Schnupfen_NP_HKU1) %>%
+  gather(lineblot, value, -c(tln_ID, blut_ID)) %>%
+  mutate(value = ifelse(value == "Negative", "0.5", value),
+         value = as.numeric(value)) %>%
+  spread(lineblot, value)
+
+lab <- lab %>%
+  select(-c(LineBlot_NP_SARS_2, LineBlot_RBD_SARS_2,
+         LineBlot_S1_SARS_2,
+         Schnupfen_NP_229E, Schnupfen_NP_NL63, 
+         Schnupfen_NP_OC43, Schnupfen_NP_HKU1)) %>%
+  left_join(lab.lineblot)
+
+
+# Thresholds
+thr.man <- as.data.frame(cutoff$old) %>%
+  gather(Test, Manufacturer)
+thr.cal <- as.data.frame(cutoff$new) %>%
+  gather(Test, Optimized)
+thresholds <- left_join(thr.man, thr.cal) %>%
+  mutate(Test = ifelse(Test == "Eur_IgA", "IgA",
+                       ifelse(Test == "Eur_IgG", "IgG", Test))) %>%
+  as_tibble()
+thresholds <- as.data.frame(thresholds)
+# Add manually the Common cold thresholds (1 for all)
+thresholds.additional <- data.frame(Test = c("Schnupfen_NP_229E",
+                                             "Schnupfen_NP_NL63",
+                                             "Schnupfen_NP_OC43",
+                                             "Schnupfen_NP_HKU1"),
+                                    Manufacturer = rep(1, 4),
+                                    Optimized = rep(1, 4))
+                                      
+thresholds <- rbind(thresholds, thresholds.additional)
+thresholds$Manufacturer[thresholds$Test == "NT"] <- 5
+str(thresholds)
+
+lab.long <- lab %>%
+  tidyr::gather(Test, value, 
+                c(Roche, IgG, IgA, NT, cPass, 
+                  VC_S1_IgA, VC_S2_IgA,  
+                  VC_N_IgA, VC_S1_IgM, 
+                  VC_S2_IgM, VC_N_IgM, 
+                  VC_S1_IgG, VC_S2_IgG, 
+                  VC_N_IgG, LineBlot_NP_SARS_2,
+                  LineBlot_RBD_SARS_2, LineBlot_S1_SARS_2,
+                  Schnupfen_NP_229E, Schnupfen_NP_NL63, 
+         Schnupfen_NP_OC43, Schnupfen_NP_HKU1)) %>%
+  select(tln_ID, blut_ID, Test, value, `Ground truth`) 
+
+lab.long.wo <- lab %>%
+  tidyr::gather(Test, value, 
+                c(Roche, IgG, IgA, cPass, 
+                  VC_S1_IgA, VC_S2_IgA,  
+                  VC_N_IgA, VC_S1_IgM, 
+                  VC_S2_IgM, VC_N_IgM, 
+                  VC_S1_IgG, VC_S2_IgG, 
+                  VC_N_IgG, LineBlot_NP_SARS_2,
+                  LineBlot_RBD_SARS_2, LineBlot_S1_SARS_2,
+                  Schnupfen_NP_229E, Schnupfen_NP_NL63, 
+         Schnupfen_NP_OC43, Schnupfen_NP_HKU1)) %>%
+  select(tln_ID, blut_ID, Test, value, `Ground truth`) 
+  
+Test.names <- data.frame(Test = unique(lab.long$Test),
+                         name = c("Ro-N-Ig", "EI-S1-IgG", "EI-S1-IgA",
+                                  "NT", "GS-cPass", 
+                                  "VC S1 IgA", "VC S2 IgA", "VC N IgA",
+                                  "VC S1 IgM", "VC S2 IgM", "VC N IgM",
+                                  "VC S1 IgG", "VC S2 IgG", "VC N IgG",
+                                  "MG-N", "MG-RBD", "MG-S1", 
+                                  "NP-229E", "NP NL63", "NP-OC43", "NP-HKU1"))
+
+Test.names
+```
+
+
+### Figure 4A (for Yannik)
+
+
+```{r, fig.width = 10, fig.height = 6, results = FALSE, echo=FALSE, warning=FALSE}
+
+# IgA vs IgG
+
+# for IgA in x-axis
+v <- 3
+#for(v in 1:length(unique(lab.long$Test))){
+  v.now <- unique(lab.long.wo$Test)[v]
+  # Deal with counts at each quadrant
+  no.se.que <- lab.long.wo %>% 
+    left_join(gather(thresholds, Type, Threshold, -Test)) %>%
+    mutate(Position = ifelse(value >= Threshold, "Above", "Below")) %>%
+    select(-value, -Threshold) %>% 
+    spread(Test, Position) %>%
+    gather(Test, Position, -c(tln_ID, blut_ID, 
+                           `Ground truth`, Type, v.now)) %>%
+    filter(Test != v.now) %>%
+    filter(!is.na(Position)) %>%
+    filter(!is.na(!!rlang::sym(v.now)))
+  
+  counts.gt.quadrants <- no.se.que %>%
+    group_by_at(c("Type", "Test", "Position", "Ground truth", v.now)) %>%
+    summarize(N=n()) %>%
+    ungroup()
+  counts.quadrants <- no.se.que %>%
+    group_by_at(c("Type", "Test", "Ground truth")) %>%
+    summarize(N.gt=n())  %>%
+    ungroup()
+  
+  counts <- left_join(counts.gt.quadrants, counts.quadrants) %>%
+    mutate(Percentage = N / N.gt * 100) %>%
+    mutate(!!v.now := factor(!!rlang::sym(v.now), 
+                             levels=c("Below", "Above")))
+  # Here I select the Optimized cutoff
+ counts <- counts %>%
+   filter(Type %in% "Optimized") %>%
+   rename(Position.main = !!rlang::sym(v.now))
+ 
+ counts <- counts %>%
+   mutate(quadrant = case_when(
+     Position == "Above" & Position.main == "Above" ~ 1,
+     Position == "Above" & Position.main == "Below" ~ 2,
+     Position == "Below" & Position.main == "Below" ~ 3,
+     Position == "Below" & Position.main == "Above" ~ 4))
+ counts <- counts %>%
+   select(-Position, -Position.main)
+
+ full.quadrants <- expand.grid(quadrant = 1:4,
+        `Ground truth` = levels(counts$`Ground truth`),
+        Test = unique(counts$Test))
+ 
+ counts.now <- filter(counts, Test != v.now) %>%
+  droplevels() %>%
+   full_join(full.quadrants) %>%
+   mutate(Percentage = ifelse(is.na(Percentage), 0, Percentage))
+ thresholds.now <- thresholds %>%
+    filter(Test != "NT") 
+  # End dealing with counts in each quadrant
+  # Start plots
+
+ # IgA vs. IgG
+
+iga.igg <- lab.long.wo %>% filter(Test %in% c("IgA", "IgG")) %>% spread(Test, value) %>%
+  gather(Test, value, -c(tln_ID, blut_ID, `Ground truth`, v.now)) %>%
+    filter(Test != v.now) %>% droplevels() %>%
+  ggplot(aes_string(y = "value", x = v.now, color = "`Ground truth`")) +
+  geom_point(data = .%>% filter(`Ground truth` == "Unknown"), alpha=0.5) +
+  geom_point(data = .%>% filter(`Ground truth` == "True-negative"), alpha=0.5) +
+  geom_point(data = .%>% filter(`Ground truth` == "True-positive"), alpha=0.5) +
+  scale_y_log10(expand=expansion(mult=c(0.15,0.15))) + 
+  scale_x_log10(expand=expansion(mult=c(0.15,0.15))) +
+  scale_colour_manual(values=style$pal3[c(2, 3, 1)]) +
+  geom_hline(data = filter(thresholds.now, Test %in%  "IgG"),
+             aes(yintercept=Manufacturer, lty=style$thr_lb_old),
+             color=style$thr_lc_old) +
+   geom_hline(data = filter(thresholds.now, Test %in% "IgG"),
+             aes(yintercept=Optimized, lty=style$thr_lb_new),
+             color=style$thr_lc_new)  +
+  geom_vline(xintercept = thresholds$Manufacturer[thresholds$Test == v.now],
+             color=style$thr_lc_old, lty=style$thr_lt_old) +
+  geom_vline(xintercept = thresholds$Optimized[thresholds$Test == v.now],
+             color=style$thr_lc_new, lty=style$thr_lt_new) +
+  scale_linetype_manual(name="Threshold",
+                        values=c(style$thr_lt_old, style$thr_lt_new)) +
+  ylab("EI-S1-IgG") + xlab("EI-S1-IgA") +
+  geom_text(data = filter(counts.now, quadrant == 1 & 
+                              `Ground truth` == "True-positive" & 
+                            Test == "IgG"),
+            aes(x=Inf, y=Inf, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+    geom_text(data = filter(counts.now, quadrant == 1 & 
+                              `Ground truth` == "True-negative" & 
+                            Test == "IgG"),
+            aes(x=Inf, y=Inf, label=paste(round(Percentage, 0), "%")), 
+            hjust=1, vjust=2.30, show.legend=FALSE, size=3.5) +
+    geom_text(data = filter(counts.now, quadrant == 2 & 
+                              `Ground truth` == "True-positive" & 
+                            Test == "IgG"),
+            aes(x=0, y=Inf, label=paste(round(Percentage, 0), "%")),
+            hjust=-0.1, vjust=1, show.legend=FALSE, size=3.5) +
+    geom_text(data = filter(counts.now, quadrant == 2 & 
+                              `Ground truth` == "True-negative" & 
+                            Test == "IgG"),
+            aes(x=0, y=Inf, label=paste(round(Percentage, 0), "%")), 
+            hjust=-0.2, vjust=2.30, show.legend=FALSE, size=3.5) +
+    geom_text(data = filter(counts.now, quadrant == 3 & 
+                              `Ground truth` == "True-positive" & 
+                            Test == "IgG"),
+            aes(x=0, y=0, label=paste(round(Percentage, 0), "%")),
+            hjust=-0.1, vjust=-0.3, show.legend=FALSE, size=3.5) +
+    geom_text(data = filter(counts.now, quadrant == 3 & 
+                              `Ground truth` == "True-negative" & 
+                            Test == "IgG"),
+            aes(x=0, y=0, label=paste(round(Percentage, 0), "%")), 
+            hjust=-0.1, vjust=-1.4, show.legend=FALSE, size=3.5) +
+       geom_text(data = filter(counts.now, quadrant == 4 & 
+                              `Ground truth` == "True-positive" & 
+                            Test == "IgG"),
+            aes(x=Inf, y=0, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=-0.3, show.legend=FALSE, size=3.5) +
+    geom_text(data = filter(counts.now, quadrant == 4 & 
+                              `Ground truth` == "True-negative" & 
+                            Test == "IgG"),
+            aes(x=Inf, y=0, label=paste(round(Percentage, 0), "%")), 
+            hjust=1, vjust=-1.4, show.legend=FALSE, size=3.5) +
+   ggpubr::stat_cor(aes(color=`Ground truth`,
+                       hjust=0, vjust=0),
+                       p.accuracy=0.001, r.accuracy=0.01,
+                   label.x.npc=0.1, label.y.npc = 1,
+                   show.legend=FALSE, size=3) +
+  theme(legend.position="none")
+  
+iga.igg
+ 
+
+
+# Roche vs IgG
+
+# for Roche in x-axis
+v <- 1
+#for(v in 1:length(unique(lab.long$Test))){
+  v.now <- unique(lab.long.wo$Test)[v]
+  # Deal with counts at each quadrant
+  no.se.que <- lab.long.wo %>% 
+    left_join(gather(thresholds, Type, Threshold, -Test)) %>%
+    mutate(Position = ifelse(value >= Threshold, "Above", "Below")) %>%
+    select(-value, -Threshold) %>% 
+    spread(Test, Position) %>%
+    gather(Test, Position, -c(tln_ID, blut_ID, 
+                           `Ground truth`, Type, v.now)) %>%
+    filter(Test != v.now) %>%
+    filter(!is.na(Position)) %>%
+    filter(!is.na(!!rlang::sym(v.now)))
+  
+  counts.gt.quadrants <- no.se.que %>%
+    group_by_at(c("Type", "Test", "Position", "Ground truth", v.now)) %>%
+    summarize(N=n()) %>%
+    ungroup()
+  counts.quadrants <- no.se.que %>%
+    group_by_at(c("Type", "Test", "Ground truth")) %>%
+    summarize(N.gt=n())  %>%
+    ungroup()
+  
+  counts <- left_join(counts.gt.quadrants, counts.quadrants) %>%
+    mutate(Percentage = N / N.gt * 100) %>%
+    mutate(!!v.now := factor(!!rlang::sym(v.now), 
+                             levels=c("Below", "Above")))
+  # Here I select the Optimized cutoff
+ counts <- counts %>%
+   filter(Type %in% "Optimized") %>%
+   rename(Position.main = !!rlang::sym(v.now))
+ 
+ counts <- counts %>%
+   mutate(quadrant = case_when(
+     Position == "Above" & Position.main == "Above" ~ 1,
+     Position == "Above" & Position.main == "Below" ~ 2,
+     Position == "Below" & Position.main == "Below" ~ 3,
+     Position == "Below" & Position.main == "Above" ~ 4))
+ counts <- counts %>%
+   select(-Position, -Position.main)
+
+ full.quadrants <- expand.grid(quadrant = 1:4,
+        `Ground truth` = levels(counts$`Ground truth`),
+        Test = unique(counts$Test))
+ 
+ counts.now <- filter(counts, Test != v.now) %>%
+  droplevels() %>%
+   full_join(full.quadrants) %>%
+   mutate(Percentage = ifelse(is.na(Percentage), 0, Percentage))
+ thresholds.now <- thresholds %>%
+    filter(Test != "NT") 
+  # End dealing with counts in each quadrant
+  # Start plots
+ 
+# Correct the percentage of true positives manually (to sum up 100)
+ counts.now <- counts.now %>%
+   mutate(Percentage = ifelse(Test == "IgG" & 
+                                `Ground truth` == "True-positive" &
+                                quadrant == 3, 12, Percentage))
+ # Roche vs. IgG
+
+roche.igg <- lab.long.wo %>% filter(Test %in% c("Roche", "IgG")) %>% spread(Test, value) %>%
+  gather(Test, value, -c(tln_ID, blut_ID, `Ground truth`, v.now)) %>%
+    filter(Test != v.now) %>% droplevels() %>%
+  ggplot(aes_string(y = "value", x = v.now, color = "`Ground truth`")) +
+  geom_point(data = .%>% filter(`Ground truth` == "Unknown"), alpha=0.5) +
+  geom_point(data = .%>% filter(`Ground truth` == "True-negative"), alpha=0.5) +
+  geom_point(data = .%>% filter(`Ground truth` == "True-positive"), alpha=0.5) +
+  scale_y_log10(expand=expansion(mult=c(0.15,0.15))) + 
+  scale_x_log10(expand=expansion(mult=c(0.15,0.15))) +
+  scale_colour_manual(values=style$pal3[c(2, 3, 1)]) +
+  geom_hline(data = filter(thresholds.now, Test %in%  "IgG"),
+             aes(yintercept=Manufacturer, lty=style$thr_lb_old),
+             color=style$thr_lc_old) +
+   geom_hline(data = filter(thresholds.now, Test %in% "IgG"),
+             aes(yintercept=Optimized, lty=style$thr_lb_new),
+             color=style$thr_lc_new)  +
+  geom_vline(xintercept = thresholds$Manufacturer[thresholds$Test == v.now],
+             color=style$thr_lc_old, lty=style$thr_lt_old) +
+  geom_vline(xintercept = thresholds$Optimized[thresholds$Test == v.now],
+             color=style$thr_lc_new, lty=style$thr_lt_new) +
+  scale_linetype_manual(name="Cut-off",
+                        values=c(style$thr_lt_old, style$thr_lt_new)) +
+  ylab("EI-S1-IgG") + xlab("Ro-N-Ig") +
+  geom_text(data = filter(counts.now, quadrant == 1 & 
+                              `Ground truth` == "True-positive" & 
+                            Test == "IgG"),
+            aes(x=Inf, y=Inf, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+    geom_text(data = filter(counts.now, quadrant == 1 & 
+                              `Ground truth` == "True-negative" & 
+                            Test == "IgG"),
+            aes(x=Inf, y=Inf, label=paste(round(Percentage, 0), "%")), 
+            hjust=1, vjust=2.30, show.legend=FALSE, size=3.5) +
+    geom_text(data = filter(counts.now, quadrant == 2 & 
+                              `Ground truth` == "True-positive" & 
+                            Test == "IgG"),
+            aes(x=0, y=Inf, label=paste(round(Percentage, 0), "%")),
+            hjust=-0.1, vjust=1, show.legend=FALSE, size=3.5) +
+    geom_text(data = filter(counts.now, quadrant == 2 & 
+                              `Ground truth` == "True-negative" & 
+                            Test == "IgG"),
+            aes(x=0, y=Inf, label=paste(round(Percentage, 0), "%")), 
+            hjust=-0.1, vjust=2.30, show.legend=FALSE, size=3.5) +
+    geom_text(data = filter(counts.now, quadrant == 3 & 
+                              `Ground truth` == "True-positive" & 
+                            Test == "IgG"),
+            aes(x=0, y=0, label=paste(round(Percentage, 0), "%")),
+            hjust=-0.1, vjust=-0.3, show.legend=FALSE, size=3.5) +
+    geom_text(data = filter(counts.now, quadrant == 3 & 
+                              `Ground truth` == "True-negative" & 
+                            Test == "IgG"),
+            aes(x=0, y=0, label=paste(round(Percentage, 0), "%")), 
+            hjust=-0.1, vjust=-1.4, show.legend=FALSE, size=3.5) +
+       geom_text(data = filter(counts.now, quadrant == 4 & 
+                              `Ground truth` == "True-positive" & 
+                            Test == "IgG"),
+            aes(x=Inf, y=0, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=-0.3, show.legend=FALSE, size=3.5) +
+    geom_text(data = filter(counts.now, quadrant == 4 & 
+                              `Ground truth` == "True-negative" & 
+                            Test == "IgG"),
+            aes(x=Inf, y=0, label=paste(round(Percentage, 0), "%")), 
+            hjust=1, vjust=-1.4, show.legend=FALSE, size=3.5) +
+  ggpubr::stat_cor(aes(color=`Ground truth`,
+                       hjust=0, vjust=0),
+                       p.accuracy=0.001, r.accuracy=0.01,
+                   label.x.npc=0.5, label.y.npc = 0.2,
+                   show.legend=FALSE, size=3)
+roche.igg
+
+legend <- cowplot::get_legend(roche.igg)
+legend
+grid.newpage()
+grid.draw(legend)
+roche.igg <- roche.igg + theme(legend.position="none")
+
+# Save the plot data, as this is required as input in `lab_figures_yannik.Rmd`
+save(iga.igg, roche.igg, legend, file=here_r("Lab-Fig-6-Part-A.RData"))
+
+```
+
+### Figure 6
+
+
+```{r, fig.width = 10, fig.height = 6, results = FALSE, echo=FALSE, warning=FALSE}
+
+# For A) NT vs cPass
+no.se.que <- lab %>%
+  select(tln_ID, blut_ID, NT, cPass, `Ground truth`) %>%
+  gather(Test, value, -c(tln_ID, blut_ID, `Ground truth`, NT)) %>%
+  left_join(thresholds) %>%
+  mutate(quadrant = case_when(
+    value < Optimized & NT == "<5" ~ "<5-below",
+    value >= Optimized & NT == "<5" ~ "<5-above",
+     value < Optimized & NT == "1:5" ~ "1:5-below",
+    value >= Optimized & NT == "1:5" ~ "1:5-above",
+    value < Optimized & NT == "10" ~ "10-below",
+    value >= Optimized & NT == "10" ~ "10-above",
+    value < Optimized & NT == "20" ~ "20-below",
+    value >= Optimized & NT == "20" ~ "20-above",
+    value < Optimized & NT == "40" ~ "40-below",
+    value >= Optimized & NT == "40" ~ "40-above",
+    value < Optimized & NT == ">80" ~ ">80-below",
+    value >= Optimized & NT == ">80" ~ ">80-above")) %>%
+  select(quadrant, `Ground truth`) %>%
+  filter(!is.na(quadrant)) 
+counts.quadrant <- no.se.que %>%
+  group_by(quadrant, `Ground truth`) %>%
+  summarize(n=n()) 
+counts.gt <- no.se.que %>%
+  group_by(`Ground truth`) %>%
+  summarize(n.total=n())
+counts <- left_join(counts.quadrant, counts.gt) %>%
+  mutate(Percentage = n / n.total * 100)
+counts 
+# For the column-wise n
+cwn <- counts.quadrant %>%
+  mutate(category = gsub("-.+", "", quadrant)) %>%
+  group_by(category) %>%
+  summarize(n.total = sum(n))
+cwn
+
+
+p1 <- lab %>%
+  filter(!is.na(NT)) %>%
+  mutate(NT = factor(as.character(NT), 
+                      levels = c("<5", "1:5", "10", "20", "40", ">80"))) %>%
+  ggplot(aes(y=cPass, x=NT, color=`Ground truth`)) +
+  # Violin plots on the right
+  #   geom_flat_violin(aes(fill=`Ground truth`, color= `Ground truth`),
+  #                    position = position_nudge(x=.02, y=0),
+  #                   alpha=0.3, trim=F, scale="area") +
+   geom_flat_violin(data = .%>% filter(`Ground truth` == "Unknown"),
+                   fill=style$col_grey, col=style$col_grey,
+                   position = position_nudge(x = .02, y = 0),
+                   alpha=0.3, trim=F, scale="area") +
+  geom_flat_violin(data = .%>% filter(`Ground truth` == "True-positive"),
+                   fill=style$col_truepos, col=style$col_truepos,
+                   position = position_nudge(x = .02, y = 0),
+                   alpha=0.3, trim=F, scale="area") +
+  geom_flat_violin(data = .%>% filter(`Ground truth` == "True-negative"),
+                   fill=style$col_trueneg, col=style$col_trueneg,
+                   position = position_nudge(x = .02, y = 0),
+                   alpha=0.3, trim=F, scale="area") +
+  # Jitter points on the left
+  geom_point(aes(x=as.numeric(NT)-0.25, y=cPass,
+                 col=`Ground truth`),
+             position = position_jitter(width = .17, ), alpha=0.5) +
+  scale_color_manual(values=style$pal3) +
+  geom_hline(data = filter(thresholds, Test == "cPass"), 
+             aes(yintercept=Manufacturer, lty=style$thr_lb_old),
+             color=style$thr_lc_old) +
+  geom_hline(data = filter(thresholds, Test == "cPass"), 
+             aes(yintercept=Optimized, lty=style$thr_lb_new),
+             color=style$thr_lc_new)  +
+  geom_vline(xintercept=1.5, color=style$thr_lc_new, lty=style$thr_lt_new) +
+  scale_linetype_manual(name="Threshold",
+                        values=c(style$thr_lt_old, style$thr_lt_new))  +
+  theme(legend.position="none") +
+   geom_text(data = filter(counts, quadrant == "10-below" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=3.15, y=-50, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == "10-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=3.15, y=130, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == "20-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=4.15, y=130, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == "40-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=5.15, y=130, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5)  +
+  geom_text(data = filter(counts, quadrant == ">80-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=6.15, y=130, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == "<5-below" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=1.15, y=-50, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1.15, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == "<5-below" & 
+                            `Ground truth` == "True-negative"),
+            aes(x=1.15, y=-50, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=0, show.legend=FALSE, size=3.5) +
+   geom_text(data = filter(counts, quadrant == "<5-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=1.15, y=130, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == "1:5-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=2.15, y=130, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+  annotate("text", x=c(1:6), y=140, size=3,
+           label=c(paste("n=", cwn$n.total))) +
+  ylab("GS-cPass") +
+  scale_x_discrete(labels=c("<5", "5", "10", "20", "40", ">80"))
+
+p1
+
+# For B) NT vs LineBlot RBD
+no.se.que <- lab %>%
+  select(tln_ID, blut_ID, NT, LineBlot_RBD_SARS_2, `Ground truth`) %>%
+  gather(Test, value, -c(tln_ID, blut_ID, `Ground truth`, NT)) %>%
+  left_join(thresholds) %>%
+  mutate(quadrant = case_when(
+    value < Optimized & NT == "<5" ~ "<5-below",
+    value >= Optimized & NT == "<5" ~ "<5-above",
+    value < Optimized & NT == "1:5" ~ "1:5-below",
+    value >= Optimized & NT == "1:5" ~ "1:5-above",
+    value < Optimized & NT == "10" ~ "10-below",
+    value >= Optimized & NT == "10" ~ "10-above",
+    value < Optimized & NT == "20" ~ "20-below",
+    value >= Optimized & NT == "20" ~ "20-above",
+    value < Optimized & NT == "40" ~ "40-below",
+    value >= Optimized & NT == "40" ~ "40-above",
+    value < Optimized & NT == ">80" ~ ">80-below",
+    value >= Optimized & NT == ">80" ~ ">80-above")) %>%
+  select(quadrant, `Ground truth`) %>%
+  filter(!is.na(quadrant)) 
+counts.quadrant <- no.se.que %>%
+  group_by(quadrant, `Ground truth`) %>%
+  summarize(n=n()) 
+counts.gt <- no.se.que %>%
+  group_by(`Ground truth`) %>%
+  summarize(n.total=n())
+counts <- left_join(counts.quadrant, counts.gt) %>%
+  mutate(Percentage = n / n.total * 100)
+counts 
+# For the column-wise n
+cwn <- counts.quadrant %>%
+  mutate(category = gsub("-.+", "", quadrant)) %>%
+  group_by(category) %>%
+  summarize(n.total = sum(n))
+cwn
+
+p2 <- lab %>%
+  filter(!is.na(NT)) %>%
+  mutate(NT = factor(as.character(NT), 
+                      levels = c("<5", "1:5", "10", "20", "40", ">80"))) %>%
+  ggplot(aes(y=LineBlot_RBD_SARS_2, x=NT, color=`Ground truth`)) +
+  # Violin plots on the right
+  geom_flat_violin(data = .%>% filter(`Ground truth` == "Unknown"),
+                   fill=style$col_grey, col=style$col_grey, 
+                   position = position_nudge(x = .02, y = 0),
+                   alpha=0.3, trim=F, scale="area") +
+  geom_flat_violin(data = .%>% filter(`Ground truth` == "True-positive"),
+                   fill=style$col_truepos, col=style$col_truepos, 
+                   position = position_nudge(x = .02, y = 0),
+                   alpha=0.3, trim=F, scale="area") +
+  geom_flat_violin(data = .%>% filter(`Ground truth` == "True-negative"),
+                   fill=style$col_trueneg, col=style$col_trueneg, 
+                   position = position_nudge(x = .02, y = 0),
+                   alpha=0.3, trim=F, scale="area") + 
+  # Jitter points on the left
+  geom_point(aes(x=as.numeric(NT)-0.25, y=LineBlot_RBD_SARS_2,
+                 col=`Ground truth`),
+             position = position_jitter(width = .17, ), alpha=0.5) +
+  scale_color_manual(values=style$pal3) +
+  geom_hline(data = filter(thresholds, Test == "LineBlot_RBD_SARS_2"), 
+             aes(yintercept=Manufacturer, lty=style$thr_lb_old),
+             color=style$thr_lc_old) +
+  geom_hline(data = filter(thresholds, Test == "LineBlot_RBD_SARS_2"), 
+             aes(yintercept=Optimized, lty=style$thr_lb_new),
+             color=style$thr_lc_new)  +
+   geom_vline(xintercept=1.5, color=style$thr_lc_new, lty=style$thr_lt_new) +
+  scale_linetype_manual(name="Threshold",
+                        values=c(style$thr_lt_old, style$thr_lt_new)) +
+  ylab("Line Blot RBD") +
+  scale_y_log10(breaks=c(0.5, 1, 3, 10), labels=c("<1", "1", "3", "10")) +
+  theme(legend.position="none") +
+  geom_text(data = filter(counts, quadrant == "<5-below" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=1.15, y=0.15, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1.15, show.legend=FALSE, size=3.5) +
+    geom_text(data = filter(counts, quadrant == "<5-below" & 
+                            `Ground truth` == "True-negative"),
+            aes(x=1.15, y=0.15, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=0, show.legend=FALSE, size=3.5) +
+    geom_text(data = filter(counts, quadrant == "<5-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=1.15, y=25, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == "1:5-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=2.15, y=25, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+    geom_text(data = filter(counts, quadrant == "10-below" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=3.15, y=0.15, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == "10-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=3.15, y=25, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == "20-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=4.15, y=25, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == "40-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=5.15, y=25, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5)  +
+  geom_text(data = filter(counts, quadrant == ">80-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=6.15, y=25, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+   annotate("text", x=c(1:6), y=35, size=3,
+           label=c(paste("n=", cwn$n.total))) +
+  ylab("MG-RBD") +
+  scale_x_discrete(labels=c("<5", "5", "10", "20", "40", ">80"))
+p2
+
+# For C) cPass vs LineBlot RBD
+full.quadrants <- expand.grid(quadrant = 1:4,
+        `Ground truth` = levels(lab.long$`Ground truth`))
+
+no.se.que <- lab %>%
+  select(tln_ID, blut_ID, cPass, LineBlot_RBD_SARS_2, `Ground truth`) %>%
+  gather(Test, value, -c(tln_ID, blut_ID, `Ground truth`)) %>%
+  left_join(thresholds) %>%
+  mutate(Position = ifelse(value < Optimized, "Below", "Above")) %>%
+  select(-value, -Manufacturer, -Optimized) %>%
+  spread(Test, Position) %>%
+  mutate(quadrant = case_when(
+    cPass == "Above" & LineBlot_RBD_SARS_2 == "Above" ~ 1,
+    cPass == "Below" & LineBlot_RBD_SARS_2 == "Above" ~ 2,
+    cPass == "Below" & LineBlot_RBD_SARS_2 == "Below" ~ 3,
+    cPass == "Above" & LineBlot_RBD_SARS_2 == "Below" ~ 4)) %>%
+  select(quadrant, `Ground truth`) %>%
+  filter(!is.na(quadrant)) 
+counts.quadrant <- no.se.que %>%
+  group_by(quadrant, `Ground truth`) %>%
+  summarize(n=n()) 
+counts.gt <- no.se.que %>%
+  group_by(`Ground truth`) %>%
+  summarize(n.total=n())
+counts <- left_join(counts.quadrant, counts.gt) %>%
+  mutate(Percentage = n / n.total * 100) %>%
+  full_join(full.quadrants) %>%
+  mutate(Percentage = ifelse(is.na(Percentage), 0, Percentage))
+counts 
+
+p3 <- ggplot(lab, aes(y=LineBlot_RBD_SARS_2, x=cPass, color=`Ground truth`)) +
+  geom_point(alpha=0.5) +
+  scale_color_manual(values=style$pal3) +
+#  scale_y_log10(expand=expansion(mult=c(0.2,0.2))) + 
+  scale_y_log10(limits=c(0.45, 15), 
+                breaks=c(0.5, 1, 3, 10), labels=c("<1", 1, 3, 10),
+                expand=expansion(mult=c(0.1, 0.1))) +
+  ylab("Line Blot RBD") +
+  geom_hline(data = filter(thresholds, Test == "LineBlot_RBD_SARS_2"), 
+             aes(yintercept=Manufacturer, lty=style$thr_lb_old),
+             color=style$thr_lc_old) +
+  geom_hline(data = filter(thresholds, Test == "LineBlot_RBD_SARS_2"), 
+             aes(yintercept=Optimized, lty=style$thr_lb_new),
+             color=style$thr_lc_new)  +
+  geom_vline(xintercept=thresholds$Manufacturer[thresholds$Test == "cPass"], 
+             lty=style$thr_lt_old, color=style$thr_lc_old) +
+  geom_vline(xintercept=thresholds$Optimized[thresholds$Test == "cPass"],
+             lty=style$thr_lt_new, color=style$thr_lc_new)  +
+  scale_linetype_manual(name="Cut-off",
+                        values=c(style$thr_lt_old, style$thr_lt_new)) +
+  geom_text(data = filter(counts, quadrant == 1 & 
+                            `Ground truth` == "True-positive"),
+            aes(x=Inf, y=Inf, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == 1 & 
+                            `Ground truth` == "True-negative"),
+            aes(x=Inf, y=Inf, label=paste(round(Percentage, 0), "%")), 
+            hjust=1, vjust=2.30, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == 2 & 
+                            `Ground truth` == "True-positive"),
+            aes(x=-Inf, y=Inf, label=paste(round(Percentage, 0), "%")),
+            hjust=-0.1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == 2 & 
+                            `Ground truth` == "True-negative"),
+            aes(x=-Inf, y=Inf, label=paste(round(Percentage, 0), "%")), 
+            hjust=-0.1, vjust=2.30, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == 3 & 
+                            `Ground truth` == "True-positive"),
+            aes(x=-Inf, y=0, label=paste(round(Percentage, 0), "%")),
+            hjust=0, vjust=-0.3, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == 3 & 
+                            `Ground truth` == "True-negative"),
+            aes(x=-Inf, y=0, label=paste(round(Percentage, 0), "%")), 
+            hjust=0, vjust=-1.4, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == 4 & 
+                            `Ground truth` == "True-positive"),
+            aes(x=Inf, y=0, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=-0.3, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == 4 & 
+                            `Ground truth` == "True-negative"),
+            aes(x=Inf, y=0, label=paste(round(Percentage, 0), "%")), 
+            hjust=1, vjust=-1.4, show.legend=FALSE, size=3.5) +
+  xlab("GS-cPass") + ylab("MG-RBD")
+
+p3  
+
+library(grid)
+library(gridExtra)
+legend <- cowplot::get_legend(p3)
+legend
+grid.newpage()
+grid.draw(legend)
+p3 <- p3 + theme(legend.position="none")
+
+p3
+
+
+plot_grid(
+  plot_grid(
+    title_plot("A", p1),
+    title_plot("B", p2),
+    title_plot("C", p3),
+    legend,
+    nrow=1, rel_widths = c(0.30, 0.30, 0.30, 0.1)))
+
+ggsave(here_out("Lab-Fig-6-updated21.png"), width=14, height=4, units="in")
+ggsave(here_out("Lab-Fig-6-updated21.pdf"), width=14, height=4, units="in")
+
+
+# Spaguetti plots (parallel coordinates) for NT, cPass and RBD
+p4 <- lab %>%
+  select(tln_ID, blut_ID, `Ground truth`, NT, cPass, LineBlot_RBD_SARS_2) %>%
+  mutate(NT = as.character(NT),
+         NT = ifelse(NT == "<5", "-30", ifelse(NT == "1:5", "5", ifelse(NT == ">80", "80", NT)))) %>%
+  mutate(LineBlot_RBD_SARS_2 = ifelse(LineBlot_RBD_SARS_2 == 0.5, -4, LineBlot_RBD_SARS_2)) %>%
+  rename(`GS-cPass` = cPass,
+         `MG-RBD` = LineBlot_RBD_SARS_2) %>%
+  mutate(`MG-RBD` = `MG-RBD` * 7.5) %>%
+  gather(Test, value, -c(tln_ID, blut_ID, `Ground truth`)) %>%
+  mutate(value = as.numeric(value)) %>%
+  ggplot(aes(x=Test, y=value, color=`Ground truth`, group=tln_ID)) +
+  geom_point(alpha=0.5) +
+  geom_line(alpha=0.5) +
+  scale_color_manual(values=style$pal3) +
+ # scale_y_log10() +
+  #scale_y_log10(limits=c(-75, 100),
+   #             breaks=c(1, 10, 20, 40, 80), labels=c("<1", "<10", 20, 40, ">80")) +
+  xlab("") + ylab("Measurement value") +
+  theme(legend.position="none") +
+  scale_y_continuous("Measurement value (GS-cPass)", 
+                breaks=c(1, 20, 50, 100),
+                labels=c(1, 20, 50, 100),
+                sec.axis=sec_axis(~./7.5, 
+                name="Measurement value (MG-RBD)",
+                breaks=c(-4, 1, 5, 10, 13),
+                labels=c("<1", 1, 5, 10, 13))) +
+  #geom_vline(xintercept=3.15) +
+  annotate("text", x=3.175, y=c(-30.2, 5.1, 10.1, 20.1, 40.1, 80.1), 
+           label=c("<5", "5", "10", "20", "40",">80"),
+           size=3, fontface="plain")
+p4  
+
+
+plot_grid(p4, legend,
+          nrow=1, rel_widths=c(0.8, 0.2))
+ggsave(here_out("2_Lab-Fig-6-SI-updated21.png"), width=6, height=4, units="in")
+ggsave(here_out("2_Lab-Fig-6-SI-updated21.pdf"), width=6, height=4, units="in")
+```
+
+### Figure 6 Boxplot
+
+
+```{r, fig.width = 10, fig.height = 6, results = FALSE, echo=FALSE, warning=FALSE}
+
+# For A) NT vs cPass
+no.se.que <- lab %>%
+  select(tln_ID, blut_ID, NT, cPass, `Ground truth`) %>%
+  gather(Test, value, -c(tln_ID, blut_ID, `Ground truth`, NT)) %>%
+  left_join(thresholds) %>%
+  mutate(quadrant = case_when(
+    value < Optimized & NT == "<5" ~ "<5-below",
+    value >= Optimized & NT == "<5" ~ "<5-above",
+     value < Optimized & NT == "1:5" ~ "1:5-below",
+    value >= Optimized & NT == "1:5" ~ "1:5-above",
+    value < Optimized & NT == "10" ~ "10-below",
+    value >= Optimized & NT == "10" ~ "10-above",
+    value < Optimized & NT == "20" ~ "20-below",
+    value >= Optimized & NT == "20" ~ "20-above",
+    value < Optimized & NT == "40" ~ "40-below",
+    value >= Optimized & NT == "40" ~ "40-above",
+    value < Optimized & NT == ">80" ~ ">80-below",
+    value >= Optimized & NT == ">80" ~ ">80-above")) %>%
+  select(quadrant, `Ground truth`) %>%
+  filter(!is.na(quadrant)) 
+counts.quadrant <- no.se.que %>%
+  group_by(quadrant, `Ground truth`) %>%
+  summarize(n=n()) 
+counts.gt <- no.se.que %>%
+  group_by(`Ground truth`) %>%
+  summarize(n.total=n())
+counts <- left_join(counts.quadrant, counts.gt) %>%
+  mutate(Percentage = n / n.total * 100)
+counts 
+# For the column-wise n
+cwn <- counts.quadrant %>%
+  mutate(category = gsub("-.+", "", quadrant)) %>%
+  group_by(category) %>%
+  summarize(n.total = sum(n))
+cwn
+
+
+p1 <- lab %>%
+  filter(!is.na(NT)) %>%
+  mutate(NT = factor(as.character(NT), 
+                      levels = c("<5", "1:5", "10", "20", "40", ">80"))) %>%
+  ggplot(aes(y=cPass, x=NT, color=`Ground truth`)) +
+  geom_flat_violin(data = .%>% filter(`Ground truth` == "Unknown"),
+                   fill=style$col_grey, col=style$col_grey,
+                   position = position_nudge(x = .02, y = 0),
+                   alpha=0.3, trim=F, scale="area") +
+  geom_flat_violin(data = .%>% filter(`Ground truth` == "True-positive"),
+                   fill=style$col_truepos, col=style$col_truepos,
+                   position = position_nudge(x = .02, y = 0),
+                   alpha=0.3, trim=F, scale="area") +
+  geom_flat_violin(data = .%>% filter(`Ground truth` == "True-negative"),
+                   fill=style$col_trueneg, col=style$col_trueneg,
+                   position = position_nudge(x = .02, y = 0),
+                   alpha=0.3, trim=F, scale="area") +
+  # Jitter points on the left
+  geom_point(aes(x=as.numeric(NT)-0.25, y=cPass,
+                 col=`Ground truth`),
+             position = position_jitter(width = .17, ), alpha=0.5) +
+  scale_color_manual(values=style$pal3) +
+  geom_hline(data = filter(thresholds, Test == "cPass"), 
+             aes(yintercept=Manufacturer, lty=style$thr_lb_old),
+             color=style$thr_lc_old) +
+  geom_hline(data = filter(thresholds, Test == "cPass"), 
+             aes(yintercept=Optimized, lty=style$thr_lb_new),
+             color=style$thr_lc_new)  +
+  geom_vline(xintercept=1.5, color=style$thr_lc_new, lty=style$thr_lt_new) +
+  scale_linetype_manual(name="Threshold",
+                        values=c(style$thr_lt_old, style$thr_lt_new))  +
+  theme(legend.position="none") +
+   geom_text(data = filter(counts, quadrant == "10-below" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=3.15, y=-50, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == "10-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=3.15, y=130, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == "20-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=4.15, y=130, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == "40-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=5.15, y=130, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5)  +
+  geom_text(data = filter(counts, quadrant == ">80-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=6.15, y=130, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == "<5-below" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=1.15, y=-50, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1.15, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == "<5-below" & 
+                            `Ground truth` == "True-negative"),
+            aes(x=1.15, y=-50, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=0, show.legend=FALSE, size=3.5) +
+   geom_text(data = filter(counts, quadrant == "<5-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=1.15, y=130, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == "1:5-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=2.15, y=130, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+  annotate("text", x=c(1:6), y=140, size=3,
+           label=c(paste("n=", cwn$n.total))) +
+  ylab("GS-cPass") +
+  scale_x_discrete(labels=c("<5", "5", "10", "20", "40", ">80")) +
+  geom_boxplot(aes(x=as.numeric(NT)-0.05, y=cPass, group=NT), 
+               width=0.1, outlier.shape=NA)
+
+p1
+
+# For B) NT vs LineBlot RBD
+no.se.que <- lab %>%
+  select(tln_ID, blut_ID, NT, LineBlot_RBD_SARS_2, `Ground truth`) %>%
+  gather(Test, value, -c(tln_ID, blut_ID, `Ground truth`, NT)) %>%
+  left_join(thresholds) %>%
+  mutate(quadrant = case_when(
+    value < Optimized & NT == "<5" ~ "<5-below",
+    value >= Optimized & NT == "<5" ~ "<5-above",
+    value < Optimized & NT == "1:5" ~ "1:5-below",
+    value >= Optimized & NT == "1:5" ~ "1:5-above",
+    value < Optimized & NT == "10" ~ "10-below",
+    value >= Optimized & NT == "10" ~ "10-above",
+    value < Optimized & NT == "20" ~ "20-below",
+    value >= Optimized & NT == "20" ~ "20-above",
+    value < Optimized & NT == "40" ~ "40-below",
+    value >= Optimized & NT == "40" ~ "40-above",
+    value < Optimized & NT == ">80" ~ ">80-below",
+    value >= Optimized & NT == ">80" ~ ">80-above")) %>%
+  select(quadrant, `Ground truth`) %>%
+  filter(!is.na(quadrant)) 
+counts.quadrant <- no.se.que %>%
+  group_by(quadrant, `Ground truth`) %>%
+  summarize(n=n()) 
+counts.gt <- no.se.que %>%
+  group_by(`Ground truth`) %>%
+  summarize(n.total=n())
+counts <- left_join(counts.quadrant, counts.gt) %>%
+  mutate(Percentage = n / n.total * 100)
+counts 
+# For the column-wise n
+cwn <- counts.quadrant %>%
+  mutate(category = gsub("-.+", "", quadrant)) %>%
+  group_by(category) %>%
+  summarize(n.total = sum(n))
+cwn
+
+p2 <- lab %>%
+  filter(!is.na(NT)) %>%
+  mutate(NT = factor(as.character(NT), 
+                      levels = c("<5", "1:5", "10", "20", "40", ">80"))) %>%
+  ggplot(aes(y=LineBlot_RBD_SARS_2, x=NT, color=`Ground truth`)) +
+  # Violin plots on the right
+  geom_flat_violin(data = .%>% filter(`Ground truth` == "Unknown"),
+                   fill=style$col_grey, col=style$col_grey, 
+                   position = position_nudge(x = .02, y = 0),
+                   alpha=0.3, trim=F, scale="area") +
+  geom_flat_violin(data = .%>% filter(`Ground truth` == "True-positive"),
+                   fill=style$col_truepos, col=style$col_truepos, 
+                   position = position_nudge(x = .02, y = 0),
+                   alpha=0.3, trim=F, scale="area") +
+  geom_flat_violin(data = .%>% filter(`Ground truth` == "True-negative"),
+                   fill=style$col_trueneg, col=style$col_trueneg, 
+                   position = position_nudge(x = .02, y = 0),
+                   alpha=0.3, trim=F, scale="area") + 
+  # Jitter points on the left
+  geom_point(aes(x=as.numeric(NT)-0.25, y=LineBlot_RBD_SARS_2,
+                 col=`Ground truth`),
+             position = position_jitter(width = .17, ), alpha=0.5) +
+  scale_color_manual(values=style$pal3) +
+  geom_hline(data = filter(thresholds, Test == "LineBlot_RBD_SARS_2"), 
+             aes(yintercept=Manufacturer, lty=style$thr_lb_old),
+             color=style$thr_lc_old) +
+  geom_hline(data = filter(thresholds, Test == "LineBlot_RBD_SARS_2"), 
+             aes(yintercept=Optimized, lty=style$thr_lb_new),
+             color=style$thr_lc_new)  +
+   geom_vline(xintercept=1.5, color=style$thr_lc_new, lty=style$thr_lt_new) +
+  scale_linetype_manual(name="Threshold",
+                        values=c(style$thr_lt_old, style$thr_lt_new)) +
+  ylab("Line Blot RBD") +
+  scale_y_log10(breaks=c(0.5, 1, 3, 10), labels=c("<1", "1", "3", "10")) +
+  theme(legend.position="none") +
+  geom_boxplot(aes(x=as.numeric(NT)-0.05, y=LineBlot_RBD_SARS_2, group=NT), 
+               width=0.1, outlier.shape=NA) +
+  geom_text(data = filter(counts, quadrant == "<5-below" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=1.15, y=0.15, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1.15, show.legend=FALSE, size=3.5) +
+    geom_text(data = filter(counts, quadrant == "<5-below" & 
+                            `Ground truth` == "True-negative"),
+            aes(x=1.15, y=0.15, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=0, show.legend=FALSE, size=3.5) +
+    geom_text(data = filter(counts, quadrant == "<5-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=1.15, y=25, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == "1:5-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=2.15, y=25, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+    geom_text(data = filter(counts, quadrant == "10-below" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=3.15, y=0.15, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == "10-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=3.15, y=25, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == "20-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=4.15, y=25, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == "40-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=5.15, y=25, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5)  +
+  geom_text(data = filter(counts, quadrant == ">80-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=6.15, y=25, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+   annotate("text", x=c(1:6), y=35, size=3,
+           label=c(paste("n=", cwn$n.total))) +
+  ylab("MG-RBD") +
+  scale_x_discrete(labels=c("<5", "5", "10", "20", "40", ">80"))
+p2
+
+# For C) cPass vs LineBlot RBD
+full.quadrants <- expand.grid(quadrant = 1:4,
+        `Ground truth` = levels(lab.long$`Ground truth`))
+
+no.se.que <- lab %>%
+  select(tln_ID, blut_ID, cPass, LineBlot_RBD_SARS_2, `Ground truth`) %>%
+  gather(Test, value, -c(tln_ID, blut_ID, `Ground truth`)) %>%
+  left_join(thresholds) %>%
+  mutate(Position = ifelse(value < Optimized, "Below", "Above")) %>%
+  select(-value, -Manufacturer, -Optimized) %>%
+  spread(Test, Position) %>%
+  mutate(quadrant = case_when(
+    cPass == "Above" & LineBlot_RBD_SARS_2 == "Above" ~ 1,
+    cPass == "Below" & LineBlot_RBD_SARS_2 == "Above" ~ 2,
+    cPass == "Below" & LineBlot_RBD_SARS_2 == "Below" ~ 3,
+    cPass == "Above" & LineBlot_RBD_SARS_2 == "Below" ~ 4)) %>%
+  select(quadrant, `Ground truth`) %>%
+  filter(!is.na(quadrant)) 
+counts.quadrant <- no.se.que %>%
+  group_by(quadrant, `Ground truth`) %>%
+  summarize(n=n()) 
+counts.gt <- no.se.que %>%
+  group_by(`Ground truth`) %>%
+  summarize(n.total=n())
+counts <- left_join(counts.quadrant, counts.gt) %>%
+  mutate(Percentage = n / n.total * 100) %>%
+  full_join(full.quadrants) %>%
+  mutate(Percentage = ifelse(is.na(Percentage), 0, Percentage))
+counts 
+
+p3 <- ggplot(lab, aes(y=LineBlot_RBD_SARS_2, x=cPass, color=`Ground truth`)) +
+  geom_point(alpha=0.5) +
+  scale_color_manual(values=style$pal3) +
+#  scale_y_log10(expand=expansion(mult=c(0.2,0.2))) + 
+  scale_y_log10(limits=c(0.45, 15), 
+                breaks=c(0.5, 1, 3, 10), labels=c("<1", 1, 3, 10),
+                expand=expansion(mult=c(0.1, 0.1))) +
+  ylab("Line Blot RBD") +
+  geom_hline(data = filter(thresholds, Test == "LineBlot_RBD_SARS_2"), 
+             aes(yintercept=Manufacturer, lty=style$thr_lb_old),
+             color=style$thr_lc_old) +
+  geom_hline(data = filter(thresholds, Test == "LineBlot_RBD_SARS_2"), 
+             aes(yintercept=Optimized, lty=style$thr_lb_new),
+             color=style$thr_lc_new)  +
+  geom_vline(xintercept=thresholds$Manufacturer[thresholds$Test == "cPass"], 
+             lty=style$thr_lt_old, color=style$thr_lc_old) +
+  geom_vline(xintercept=thresholds$Optimized[thresholds$Test == "cPass"],
+             lty=style$thr_lt_new, color=style$thr_lc_new)  +
+  scale_linetype_manual(name="Cut-off",
+                        values=c(style$thr_lt_old, style$thr_lt_new)) +
+  geom_text(data = filter(counts, quadrant == 1 & 
+                            `Ground truth` == "True-positive"),
+            aes(x=Inf, y=Inf, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == 1 & 
+                            `Ground truth` == "True-negative"),
+            aes(x=Inf, y=Inf, label=paste(round(Percentage, 0), "%")), 
+            hjust=1, vjust=2.30, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == 2 & 
+                            `Ground truth` == "True-positive"),
+            aes(x=-Inf, y=Inf, label=paste(round(Percentage, 0), "%")),
+            hjust=-0.1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == 2 & 
+                            `Ground truth` == "True-negative"),
+            aes(x=-Inf, y=Inf, label=paste(round(Percentage, 0), "%")), 
+            hjust=-0.1, vjust=2.30, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == 3 & 
+                            `Ground truth` == "True-positive"),
+            aes(x=-Inf, y=0, label=paste(round(Percentage, 0), "%")),
+            hjust=0, vjust=-0.3, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == 3 & 
+                            `Ground truth` == "True-negative"),
+            aes(x=-Inf, y=0, label=paste(round(Percentage, 0), "%")), 
+            hjust=0, vjust=-1.4, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == 4 & 
+                            `Ground truth` == "True-positive"),
+            aes(x=Inf, y=0, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=-0.3, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == 4 & 
+                            `Ground truth` == "True-negative"),
+            aes(x=Inf, y=0, label=paste(round(Percentage, 0), "%")), 
+            hjust=1, vjust=-1.4, show.legend=FALSE, size=3.5) +
+  xlab("GS-cPass") + ylab("MG-RBD") +
+    geom_smooth(data = .%>% filter(LineBlot_RBD_SARS_2 >= 1 & cPass >= 20),
+              method="lm", aes(color = NULL), color="black")
+p3  
+
+library(grid)
+library(gridExtra)
+legend <- cowplot::get_legend(p3)
+legend
+grid.newpage()
+grid.draw(legend)
+p3 <- p3 + theme(legend.position="none")
+
+p3
+
+
+plot_grid(
+  plot_grid(
+    title_plot("A", p1),
+    title_plot("B", p2),
+    title_plot("C", p3),
+    legend,
+    nrow=1, rel_widths = c(0.30, 0.30, 0.30, 0.1)))
+
+ggsave(here_out("Lab-Fig-6-updated21.png"), width=14, height=4, units="in")
+ggsave(here_out("Lab-Fig-6-updated21.pdf"), width=14, height=4, units="in")
+
+
+# Spaguetti plots (parallel coordinates) for NT, cPass and RBD
+p4 <- lab %>%
+  select(tln_ID, blut_ID, `Ground truth`, NT, cPass, LineBlot_RBD_SARS_2) %>%
+  mutate(NT = as.character(NT),
+         NT = ifelse(NT == "<5", "-30", ifelse(NT == "1:5", "5", ifelse(NT == ">80", "80", NT)))) %>%
+  mutate(LineBlot_RBD_SARS_2 = ifelse(LineBlot_RBD_SARS_2 == 0.5, -4, LineBlot_RBD_SARS_2)) %>%
+  rename(`GS-cPass` = cPass,
+         `MG-RBD` = LineBlot_RBD_SARS_2) %>%
+  mutate(`MG-RBD` = `MG-RBD` * 7.5) %>%
+  gather(Test, value, -c(tln_ID, blut_ID, `Ground truth`)) %>%
+  mutate(value = as.numeric(value)) %>%
+  ggplot(aes(x=Test, y=value, color=`Ground truth`, group=tln_ID)) +
+  geom_point(alpha=0.5) +
+  geom_line(alpha=0.5) +
+  scale_color_manual(values=style$pal3) +
+ # scale_y_log10() +
+  #scale_y_log10(limits=c(-75, 100),
+   #             breaks=c(1, 10, 20, 40, 80), labels=c("<1", "<10", 20, 40, ">80")) +
+  xlab("") + ylab("Measurement value") +
+  theme(legend.position="none") +
+  scale_y_continuous("Measurement value (GS-cPass)", 
+                breaks=c(1, 20, 50, 100),
+                labels=c(1, 20, 50, 100),
+                sec.axis=sec_axis(~./7.5, 
+                name="Measurement value (MG-RBD)",
+                breaks=c(-4, 1, 5, 10, 13),
+                labels=c("<1", 1, 5, 10, 13))) +
+  #geom_vline(xintercept=3.15) +
+  annotate("text", x=3.175, y=c(-30.2, 5.1, 10.1, 20.1, 40.1, 80.1), 
+           label=c("<5", "5", "10", "20", "40",">80"),
+           size=3, fontface="plain")
+p4  
+
+
+plot_grid(p4, legend,
+          nrow=1, rel_widths=c(0.8, 0.2))
+ggsave(here_out("2_Lab-Fig-6-SI-updated21.png"), width=6, height=4, units="in")
+ggsave(here_out("2_Lab-Fig-6-SI-updated21.pdf"), width=6, height=4, units="in")
+```
+
+
+
+### Figure 7
+
+
+```{r, fig.width = 10, fig.height = 6, results = FALSE, echo=FALSE, warning=FALSE}
+
+#----------------------------------------------- Fig7 - A
+
+# For NT vs IgG
+no.se.que <- lab %>%
+  select(tln_ID, blut_ID, NT, IgG, `Ground truth`) %>%
+  gather(Test, value, -c(tln_ID, blut_ID, `Ground truth`, NT)) %>%
+  left_join(thresholds) %>%
+  mutate(quadrant = case_when(
+    value < Optimized & NT == "<5" ~ "<5-below",
+    value >= Optimized & NT == "<5" ~ "<5-above",
+    value < Optimized & NT == "1:5" ~ "1:5-below",
+    value >= Optimized & NT == "1:5" ~ "1:5-above",
+    value < Optimized & NT == "10" ~ "10-below",
+    value >= Optimized & NT == "10" ~ "10-above",
+    value < Optimized & NT == "20" ~ "20-below",
+    value >= Optimized & NT == "20" ~ "20-above",
+    value < Optimized & NT == "40" ~ "40-below",
+    value >= Optimized & NT == "40" ~ "40-above",
+    value < Optimized & NT == ">80" ~ ">80-below",
+    value >= Optimized & NT == ">80" ~ ">80-above")) %>%
+  select(quadrant, `Ground truth`) %>%
+  filter(!is.na(quadrant)) 
+counts.quadrant <- no.se.que %>%
+  group_by(quadrant, `Ground truth`) %>%
+  summarize(n=n()) 
+counts.gt <- no.se.que %>%
+  group_by(`Ground truth`) %>%
+  summarize(n.total=n())
+counts <- left_join(counts.quadrant, counts.gt) %>%
+  mutate(Percentage = n / n.total * 100)
+counts 
+# For the column-wise n
+cwn <- counts.quadrant %>%
+  mutate(category = gsub("-.+", "", quadrant)) %>%
+  group_by(category) %>%
+  summarize(n.total = sum(n))
+cwn
+p7a <- lab %>%
+  filter(!is.na(NT)) %>%
+  mutate(NT = factor(as.character(NT), 
+                      levels = c("<5", "1:5", "10", "20", "40", ">80"))) %>%
+  ggplot(aes(y=IgG, x=NT, color=`Ground truth`)) +
+  # Violin plots on the right
+  geom_flat_violin(data = .%>% filter(`Ground truth` == "Unknown"),
+                   fill=style$col_grey, col=style$col_grey, 
+                   position = position_nudge(x = .02, y = 0),
+                   alpha=0.3, trim=F, scale="area") +
+  geom_flat_violin(data = .%>% filter(`Ground truth` == "True-positive"),
+                   fill=style$col_truepos, col=style$col_truepos, 
+                   position = position_nudge(x = .02, y = 0),
+                   alpha=0.3, trim=F, scale="area") +
+  geom_flat_violin(data = .%>% filter(`Ground truth` == "True-negative"),
+                   fill=style$col_trueneg, col=style$col_trueneg, 
+                   position = position_nudge(x = .02, y = 0),
+                   alpha=0.3, trim=F, scale="area") +
+  # Jitter points on the left
+  geom_point(aes(x=as.numeric(NT)-0.25, y=IgG,
+                 col=`Ground truth`),
+             position = position_jitter(width = .17, ), alpha=0.5) +
+   geom_boxplot(aes(x=as.numeric(NT)-0.05, y=IgG, group=NT), 
+               width=0.1, outlier.shape=NA) +
+  scale_color_manual(values=style$pal3) +
+  geom_hline(data = filter(thresholds, Test == "IgG"), 
+             aes(yintercept=Manufacturer, lty=style$thr_lb_old),
+             color=style$thr_lc_old) +
+  geom_hline(data = filter(thresholds, Test == "IgG"), 
+             aes(yintercept=Optimized, lty=style$thr_lb_new),
+             color=style$thr_lc_new)  +
+  scale_linetype_manual(name="Threshold",
+                        values=c(style$thr_lt_old, style$thr_lt_new))  +
+  theme(legend.position="none") +
+  scale_y_log10() +
+  geom_text(data = filter(counts, quadrant == "<5-below" & 
+                            `Ground truth` == "True-negative"),
+            aes(x=1.30, y=0.02, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1.15, show.legend=FALSE, size=3.5) +
+    geom_text(data = filter(counts, quadrant == "<5-below" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=1.30, y=0.02, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=0, show.legend=FALSE, size=3.5) +
+    geom_text(data = filter(counts, quadrant == "<5-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=1.30, y=35, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=0, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == "1:5-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=2.30, y=35, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=0, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == "10-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=3.30, y=35, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=0, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == "20-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=4.30, y=35, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=0, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == "40-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=5.30, y=35, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=0, show.legend=FALSE, size=3.5)  +
+  geom_text(data = filter(counts, quadrant == ">80-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=6.30, y=35, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=0, show.legend=FALSE, size=3.5) +
+  annotate("text", x=c(1:6), y=75, size=3,
+           label=c(paste("n=", cwn$n.total))) +
+  xlab("NT") + ylab("EI-S1-IgG") +
+  geom_vline(xintercept=1.5, col=style$thr_lc_new, lty=style$thr_lt_new) +
+    geom_vline(xintercept=1.5, col=style$thr_lc_old, lty=style$thr_lt_old) +
+  scale_x_discrete(labels=c("<5", "5", "10", "20", "40", ">80"))
+
+p7a
+
+
+#----------------------------------------------- Fig7 - B
+
+# for IgG in y-axis
+v <- 2
+#for(v in 1:length(unique(lab.long$Test))){
+  v.now <- unique(lab.long.wo$Test)[v]
+  # Deal with counts at each quadrant
+  no.se.que <- lab.long.wo %>% 
+    left_join(gather(thresholds, Type, Threshold, -Test)) %>%
+    mutate(Position = ifelse(value >= Threshold, "Above", "Below")) %>%
+    select(-value, -Threshold) %>% 
+    spread(Test, Position) %>%
+    gather(Test, Position, -c(tln_ID, blut_ID, 
+                           `Ground truth`, Type, v.now)) %>%
+    filter(Test != v.now) %>%
+    filter(!is.na(Position)) %>%
+    filter(!is.na(!!rlang::sym(v.now)))
+  
+  counts.gt.quadrants <- no.se.que %>%
+    group_by_at(c("Type", "Test", "Position", "Ground truth", v.now)) %>%
+    summarize(N=n()) %>%
+    ungroup()
+  counts.quadrants <- no.se.que %>%
+    group_by_at(c("Type", "Test", "Ground truth")) %>%
+    summarize(N.gt=n())  %>%
+    ungroup()
+  
+  counts <- left_join(counts.gt.quadrants, counts.quadrants) %>%
+    mutate(Percentage = N / N.gt * 100) %>%
+    mutate(!!v.now := factor(!!rlang::sym(v.now), 
+                             levels=c("Below", "Above")))
+  # Here I select the Optimized cutoff
+ counts <- counts %>%
+   filter(Type %in% "Optimized") %>%
+   rename(Position.main = !!rlang::sym(v.now))
+ 
+ counts <- counts %>%
+   mutate(quadrant = case_when(
+     Position == "Above" & Position.main == "Above" ~ 1,
+     Position == "Below" & Position.main == "Above" ~ 2,
+     Position == "Below" & Position.main == "Below" ~ 3,
+     Position == "Above" & Position.main == "Below" ~ 4))
+ counts <- counts %>%
+   select(-Position, -Position.main)
+
+ full.quadrants <- expand.grid(quadrant = 1:4,
+        `Ground truth` = levels(counts$`Ground truth`),
+        Test = unique(counts$Test))
+ 
+ counts.now <- filter(counts, Test != v.now) %>%
+  droplevels() %>%
+   full_join(full.quadrants) %>%
+   mutate(Percentage = ifelse(is.na(Percentage), 0, Percentage))
+ thresholds.now <- thresholds %>%
+    filter(Test != "NT") 
+  # End dealing with counts in each quadrant
+  # Start plots
+ 
+# IgG vs. cPass
+p7b <- lab.long.wo %>% filter(Test %in% c("IgG", "cPass")) %>% spread(Test, value) %>%
+  gather(Test, value, -c(tln_ID, blut_ID, `Ground truth`, v.now)) %>%
+    filter(Test != v.now) %>% droplevels() %>%
+  ggplot(aes_string(x = "value", y = v.now, color = "`Ground truth`")) +
+  geom_point(data = .%>% filter(`Ground truth` == "Unknown"), alpha=0.5) +
+  geom_point(data = .%>% filter(`Ground truth` != "Unknown"), alpha=0.5) +
+  #scale_y_continuous(expand=expansion(mult=c(2,2))) + 
+#  scale_x_log10(expand=expansion(mult=c(0.15,0.15))) +
+  scale_y_log10(expand=expansion(mult=c(0.2, 0.2))) +
+  scale_colour_manual(values=style$pal3[c(2, 3, 1)]) +
+  geom_vline(data = filter(thresholds.now, Test %in%  "cPass"),
+             aes(xintercept=Manufacturer, lty=style$thr_lb_old),
+             color=style$thr_lc_old) +
+   geom_vline(data = filter(thresholds.now, Test %in% "cPass"),
+             aes(xintercept=Optimized, lty=style$thr_lb_new),
+             color=style$thr_lc_new)  +
+  geom_hline(yintercept = thresholds$Manufacturer[thresholds$Test == v.now],
+             color=style$thr_lc_old, lty=style$thr_lt_old) +
+  geom_hline(yintercept = thresholds$Optimized[thresholds$Test == v.now],
+             color=style$thr_lc_new, lty=style$thr_lt_new) +
+  scale_linetype_manual(name="Threshold",
+                        values=c(style$thr_lt_old, style$thr_lt_new)) +
+  # 1st quadrant
+  geom_text(data = filter(counts.now, quadrant == 1 & 
+                              `Ground truth` == "True-positive" & 
+                            Test == "cPass"),
+            aes(x=Inf, y=Inf, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts.now, quadrant == 1 & 
+                            `Ground truth` == "True-negative" & 
+                            Test == "cPass"),
+            aes(x=Inf, y=Inf, label=paste(round(Percentage, 0), "%")), 
+            hjust=1, vjust=2.3, show.legend=FALSE, size=3.5) +
+  # 2nd quadrant
+  geom_text(data = filter(counts.now, quadrant == 2 & 
+                            `Ground truth` == "True-positive" & 
+                            Test == "cPass"),
+            aes(x=-Inf, y=Inf, label=paste(round(Percentage, 0), "%")),
+            hjust=-0.1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts.now, quadrant == 2 & 
+                            `Ground truth` == "True-negative" & 
+                            Test == "cPass"),
+            aes(x=-Inf, y=Inf, label=paste(round(Percentage, 0), "%")), 
+            hjust=-0.1, vjust=2.3, show.legend=FALSE, size=3.5) +
+  # 3rd quadrant
+  geom_text(data = filter(counts.now, quadrant == 3 & 
+                            `Ground truth` == "True-positive" & 
+                            Test == "cPass"),
+            aes(x=-Inf, y=0, label=paste(round(Percentage, 0), "%")),
+            hjust=-0.2, vjust=-0.3, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts.now, quadrant == 3 & 
+                            `Ground truth` == "True-negative" & 
+                            Test == "cPass"),
+            aes(x=-Inf, y=0, label=paste(round(Percentage, 0), "%")), 
+            hjust=-0.1, vjust=-1.4, show.legend=FALSE, size=3.5) +
+  # 4th quadrant
+  geom_text(data = filter(counts.now, quadrant == 4 & 
+                            `Ground truth` == "True-positive" & 
+                            Test == "cPass"),
+            aes(x=Inf, y=0, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=-0.3, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts.now, quadrant == 4 & 
+                            `Ground truth` == "True-negative" & 
+                            Test == "cPass"),
+            aes(x=Inf, y=0, label=paste(round(Percentage, 0), "%")), 
+            hjust=1, vjust=-1.4, show.legend=FALSE, size=3.5) +
+  theme(legend.position = "none") +
+  ylab("EI-S1-IgG") +
+  xlab("GS-cPass") +
+  geom_smooth(data = .%>% filter(IgG >= 1 & value >= 20),
+              method="lm", aes(color = NULL), color="black")
+  
+p7b
+
+#----------------------------------------------- Fig7 - C
+
+# IgG vs. LineBlot MG-RBD
+p7c <- lab.long.wo %>% filter(Test %in% c("IgG", "LineBlot_RBD_SARS_2")) %>% spread(Test, value) %>%
+  gather(Test, value, -c(tln_ID, blut_ID, `Ground truth`, v.now)) %>%
+    filter(Test != v.now) %>% droplevels() %>%
+  ggplot(aes_string(x = "value", y = v.now, color = "`Ground truth`")) +
+  geom_point(data = .%>% filter(`Ground truth` == "Unknown"), alpha=0.5) +
+  geom_point(data = .%>% filter(`Ground truth` != "Unknown"), alpha=0.5) +
+  #scale_y_continuous(expand=expansion(mult=c(2,2))) + 
+#  scale_x_log10(expand=expansion(mult=c(0.15,0.15))) +
+  scale_y_log10(expand=expansion(mult=c(0.2,0.2))) +
+  scale_colour_manual(values=style$pal3[c(2, 3, 1)]) +
+  geom_vline(data = filter(thresholds.now, Test %in%  "LineBlot_RBD_SARS_2"),
+             aes(xintercept=Manufacturer, lty=style$thr_lb_old),
+             color=style$thr_lc_old) +
+   geom_vline(data = filter(thresholds.now, Test %in% "LineBlot_RBD_SARS_2"),
+             aes(xintercept=Optimized, lty=style$thr_lb_new),
+             color=style$thr_lc_new)  +
+  geom_hline(yintercept = thresholds$Manufacturer[thresholds$Test == v.now],
+             color=style$thr_lc_old, lty=style$thr_lt_old) +
+  geom_hline(yintercept = thresholds$Optimized[thresholds$Test == v.now],
+             color=style$thr_lc_new, lty=style$thr_lt_new) +
+  scale_linetype_manual(name="Threshold",
+                        values=c(style$thr_lt_old, style$thr_lt_new)) +
+  # 1st quadrant
+  geom_text(data = filter(counts.now, quadrant == 1 & 
+                              `Ground truth` == "True-positive" & 
+                            Test == "LineBlot_RBD_SARS_2"),
+            aes(x=Inf, y=Inf, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts.now, quadrant == 1 & 
+                            `Ground truth` == "True-negative" & 
+                            Test == "LineBlot_RBD_SARS_2"),
+            aes(x=Inf, y=Inf, label=paste(round(Percentage, 0), "%")), 
+            hjust=1, vjust=2.15, show.legend=FALSE, size=3.5) +
+  # 2nd quadrant
+  geom_text(data = filter(counts.now, quadrant == 2 & 
+                            `Ground truth` == "True-positive" & 
+                            Test == "LineBlot_RBD_SARS_2"),
+            aes(x=0, y=Inf, label=paste(round(Percentage, 0), "%")),
+            hjust=-0.1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts.now, quadrant == 2 & 
+                            `Ground truth` == "True-negative" & 
+                            Test == "LineBlot_RBD_SARS_2"),
+            aes(x=0, y=Inf, label=paste(round(Percentage, 0), "%")), 
+            hjust=-0.1, vjust=2.15, show.legend=FALSE, size=3.5) +
+  # 3rd quadrant
+  geom_text(data = filter(counts.now, quadrant == 3 & 
+                            `Ground truth` == "True-positive" & 
+                            Test == "LineBlot_RBD_SARS_2"),
+            aes(x=0, y=0, label=paste(round(Percentage, 0), "%")),
+            hjust=-0.2, vjust=-0.3, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts.now, quadrant == 3 & 
+                            `Ground truth` == "True-negative" & 
+                            Test == "LineBlot_RBD_SARS_2"),
+            aes(x=0, y=0, label=paste(round(Percentage, 0), "%")), 
+            hjust=-0.1, vjust=-1.4, show.legend=FALSE, size=3.5) +
+  # 4th quadrant
+  geom_text(data = filter(counts.now, quadrant == 4 & 
+                            `Ground truth` == "True-positive" & 
+                            Test == "LineBlot_RBD_SARS_2"),
+            aes(x=Inf, y=0, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=-0.3, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts.now, quadrant == 4 & 
+                            `Ground truth` == "True-negative" & 
+                            Test == "LineBlot_RBD_SARS_2"),
+            aes(x=Inf, y=0, label=paste(round(Percentage, 0), "%")), 
+            hjust=1, vjust=-1.4, show.legend=FALSE, size=3.5) +
+  theme(legend.position = "none") +
+  ylab("EI-S1-IgG") +
+  xlab("MG-RBD") +
+  scale_x_log10(breaks=c(0.5,  1, 3, 10), labels=c("<1", "1", "3", "10")) +
+  geom_smooth(data = .%>% filter(IgG >= 1 & value >= 1),
+              method="lm", aes(color = NULL), color="black")
+p7c
+
+#----------------------------------------------- Fig7 - D
+
+# IgG vs. LineBlot MG-N
+p7d <- lab.long.wo %>% filter(Test %in% c("IgG", "LineBlot_NP_SARS_2")) %>% spread(Test, value) %>%
+  gather(Test, value, -c(tln_ID, blut_ID, `Ground truth`, v.now)) %>%
+    filter(Test != v.now) %>% droplevels() %>%
+  ggplot(aes_string(x = "value", y = v.now, color = "`Ground truth`")) +
+  geom_point(data = .%>% filter(`Ground truth` == "Unknown"), alpha=0.5) +
+  geom_point(data = .%>% filter(`Ground truth` != "Unknown"), alpha=0.5) +
+  #scale_y_continuous(expand=expansion(mult=c(2,2))) + 
+#  scale_x_log10(expand=expansion(mult=c(0.15,0.15))) +
+  scale_y_log10(expand=expansion(mult=c(0.2,0.2))) +
+  scale_colour_manual(values=style$pal3[c(2, 3, 1)]) +
+  geom_vline(data = filter(thresholds.now, Test %in%  "LineBlot_NP_SARS_2"),
+             aes(xintercept=Manufacturer, lty=style$thr_lb_old),
+             color=style$thr_lc_old) +
+   geom_vline(data = filter(thresholds.now, Test %in% "LineBlot_NP_SARS_2"),
+             aes(xintercept=Optimized, lty=style$thr_lb_new),
+             color=style$thr_lc_new)  +
+  geom_hline(yintercept = thresholds$Manufacturer[thresholds$Test == v.now],
+             color=style$thr_lc_old, lty=style$thr_lt_old) +
+  geom_hline(yintercept = thresholds$Optimized[thresholds$Test == v.now],
+             color=style$thr_lc_new, lty=style$thr_lt_new) +
+  scale_linetype_manual(name="Threshold",
+                        values=c(style$thr_lt_old, style$thr_lt_new)) +
+  # 1st quadrant
+  geom_text(data = filter(counts.now, quadrant == 1 & 
+                              `Ground truth` == "True-positive" & 
+                            Test == "LineBlot_NP_SARS_2"),
+            aes(x=Inf, y=Inf, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts.now, quadrant == 1 & 
+                            `Ground truth` == "True-negative" & 
+                            Test == "LineBlot_NP_SARS_2"),
+            aes(x=Inf, y=Inf, label=paste(round(Percentage, 0), "%")), 
+            hjust=1, vjust=2.15, show.legend=FALSE, size=3.5) +
+  # 2nd quadrant
+  geom_text(data = filter(counts.now, quadrant == 2 & 
+                            `Ground truth` == "True-positive" & 
+                            Test == "LineBlot_NP_SARS_2"),
+            aes(x=0, y=Inf, label=paste(round(Percentage, 0), "%")),
+            hjust=-0.1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts.now, quadrant == 2 & 
+                            `Ground truth` == "True-negative" & 
+                            Test == "LineBlot_NP_SARS_2"),
+            aes(x=0, y=Inf, label=paste(round(Percentage, 0), "%")), 
+            hjust=-0.1, vjust=2.15, show.legend=FALSE, size=3.5) +
+  # 3rd quadrant
+  geom_text(data = filter(counts.now, quadrant == 3 & 
+                            `Ground truth` == "True-positive" & 
+                            Test == "LineBlot_NP_SARS_2"),
+            aes(x=0, y=0, label=paste(round(Percentage, 0), "%")),
+            hjust=-0.2, vjust=-0.1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts.now, quadrant == 3 & 
+                            `Ground truth` == "True-negative" & 
+                            Test == "LineBlot_NP_SARS_2"),
+            aes(x=0, y=0, label=paste(round(Percentage, 0), "%")), 
+            hjust=-0.1, vjust=-1.3, show.legend=FALSE, size=3.5) +
+  # 4th quadrant
+  geom_text(data = filter(counts.now, quadrant == 4 & 
+                            `Ground truth` == "True-positive" & 
+                            Test == "LineBlot_NP_SARS_2"),
+            aes(x=Inf, y=0, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=-0.1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts.now, quadrant == 4 & 
+                            `Ground truth` == "True-negative" & 
+                            Test == "LineBlot_NP_SARS_2"),
+            aes(x=Inf, y=0, label=paste(round(Percentage, 0), "%")), 
+            hjust=1, vjust=-1.15, show.legend=FALSE, size=3.5) +
+  theme(legend.position = "none") +
+  ylab("EI-S1-IgG") +
+  xlab("MG-N") +
+  scale_x_log10(breaks=c(0.5,  1, 3, 10), labels=c("<1", "1", "3", "10")) +
+  geom_smooth(data = .%>% filter(IgG >= 1 & value >= 1),
+              method="lm", aes(color = NULL), color="black")
+p7d
+
+#----------------------------------------------- Fig7 - E
+
+# For NT vs Roche
+no.se.que <- lab %>%
+  select(tln_ID, blut_ID, NT, Roche, `Ground truth`) %>%
+  gather(Test, value, -c(tln_ID, blut_ID, `Ground truth`, NT)) %>%
+  left_join(thresholds) %>%
+  mutate(quadrant = case_when(
+    value < Optimized & NT == "<5" ~ "<5-below",
+    value >= Optimized & NT == "<5" ~ "<5-above",
+    value < Optimized & NT == "1:5" ~ "1:5-below",
+    value >= Optimized & NT == "1:5" ~ "1:5-above",
+    value < Optimized & NT == "10" ~ "10-below",
+    value >= Optimized & NT == "10" ~ "10-above",
+    value < Optimized & NT == "20" ~ "20-below",
+    value >= Optimized & NT == "20" ~ "20-above",
+    value < Optimized & NT == "40" ~ "40-below",
+    value >= Optimized & NT == "40" ~ "40-above",
+    value < Optimized & NT == ">80" ~ ">80-below",
+    value >= Optimized & NT == ">80" ~ ">80-above")) %>%
+  select(quadrant, `Ground truth`) %>%
+  filter(!is.na(quadrant)) 
+counts.quadrant <- no.se.que %>%
+  group_by(quadrant, `Ground truth`) %>%
+  summarize(n=n()) 
+counts.gt <- no.se.que %>%
+  group_by(`Ground truth`) %>%
+  summarize(n.total=n())
+counts <- left_join(counts.quadrant, counts.gt) %>%
+  mutate(Percentage = n / n.total * 100)
+counts 
+# For the column-wise n
+cwn <- counts.quadrant %>%
+  mutate(category = gsub("-.+", "", quadrant)) %>%
+  group_by(category) %>%
+  summarize(n.total = sum(n))
+cwn
+p7e <- lab %>%
+  filter(!is.na(NT)) %>%
+  mutate(NT = factor(as.character(NT), 
+                      levels = c("<5", "1:5", "10", "20", "40", ">80"))) %>%
+  ggplot(aes(y=Roche, x=NT, color=`Ground truth`)) +
+  # Violin plots on the right
+  geom_flat_violin(data = .%>% filter(`Ground truth`== "Unknown"),
+                   fill=style$col_grey, col=style$col_grey, 
+                   position = position_nudge(x = .02, y = 0),
+                   alpha=0.3, trim=F, scale="area") +
+  geom_flat_violin(data = .%>% filter(`Ground truth` == "True-positive"),
+                   fill=style$col_truepos, col=style$col_truepos, 
+                   position = position_nudge(x = .02, y = 0),
+                   alpha=0.3, trim=F, scale="area") +
+  geom_flat_violin(data = .%>% filter(`Ground truth` == "True-negative"),
+                   fill=style$col_trueneg, col=style$col_trueneg, 
+                   position = position_nudge(x = .02, y = 0),
+                   alpha=0.3, trim=F, scale="area") +
+  # Jitter points on the left
+  geom_point(aes(x=as.numeric(NT)-0.25, y=Roche,
+                 col=`Ground truth`),
+             position = position_jitter(width = .17), alpha=0.5) +
+   geom_boxplot(aes(x=as.numeric(NT)-0.05, y=Roche, group=NT), 
+               width=0.1, outlier.shape=NA) +
+  scale_color_manual(values=style$pal3) +
+  geom_hline(data = filter(thresholds, Test == "Roche"), 
+             aes(yintercept=Manufacturer, lty=style$thr_lb_old),
+             color=style$thr_lc_old) +
+  geom_hline(data = filter(thresholds, Test == "Roche"), 
+             aes(yintercept=Optimized, lty=style$thr_lb_new),
+             color=style$thr_lc_new)  +
+  scale_linetype_manual(name="Threshold",
+                        values=c(style$thr_lt_old, style$thr_lt_new))  +
+  theme(legend.position="none") +
+  scale_y_log10(breaks=c(0.05, 1, 10, 100, 1000), 
+                labels=c("0.05", "1", "10", "100", "1000")) +
+  annotate("text", x=c(1:6), y=20000, size=3,
+           label=c(paste("n=", cwn$n.total))) +
+  xlab("NT") + ylab("Ro-N-Ig") +
+  geom_vline(xintercept=1.5, col=style$thr_lc_new, lty=style$thr_lt_new) +
+  geom_vline(xintercept=1.5, col=style$thr_lc_old, lty=style$thr_lt_old) +
+  geom_text(data = filter(counts, quadrant == "<5-below" & 
+                            `Ground truth` == "True-negative"),
+            aes(x=1.30, y=0.001, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == "<5-above" & 
+                            `Ground truth` == "True-negative"),
+            aes(x=1.30, y=5000, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1.15, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == "<5-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=1.30, y=5000, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=0, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == "1:5-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=2.30, y=5000, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=0, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == "10-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=3.30, y=5000, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=0, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == "20-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=4.30, y=5000, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=0, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts, quadrant == "40-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=5.30, y=5000, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=0, show.legend=FALSE, size=3.5)  +
+  geom_text(data = filter(counts, quadrant == ">80-above" & 
+                            `Ground truth` == "True-positive"),
+            aes(x=6.30, y=5000, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=0, show.legend=FALSE, size=3.5) +
+    scale_x_discrete(labels=c("<5", "5", "10", "20", "40", ">80"))
+ 
+
+p7e
+
+#----------------------------------------------- Fig7 - F
+
+# for Roche in y-axis
+v <- 1
+#for(v in 1:length(unique(lab.long$Test))){
+  v.now <- unique(lab.long.wo$Test)[v]
+  # Deal with counts at each quadrant
+  no.se.que <- lab.long.wo %>% 
+    left_join(gather(thresholds, Type, Threshold, -Test)) %>%
+    mutate(Position = ifelse(value >= Threshold, "Above", "Below")) %>%
+    select(-value, -Threshold) %>% 
+    spread(Test, Position) %>%
+    gather(Test, Position, -c(tln_ID, blut_ID, 
+                           `Ground truth`, Type, v.now)) %>%
+    filter(Test != v.now) %>%
+    filter(!is.na(Position)) %>%
+    filter(!is.na(!!rlang::sym(v.now)))
+  
+  counts.gt.quadrants <- no.se.que %>%
+    group_by_at(c("Type", "Test", "Position", "Ground truth", v.now)) %>%
+    summarize(N=n()) %>%
+    ungroup()
+  counts.quadrants <- no.se.que %>%
+    group_by_at(c("Type", "Test", "Ground truth")) %>%
+    summarize(N.gt=n())  %>%
+    ungroup()
+  
+  counts <- left_join(counts.gt.quadrants, counts.quadrants) %>%
+    mutate(Percentage = N / N.gt * 100) %>%
+    mutate(!!v.now := factor(!!rlang::sym(v.now), 
+                             levels=c("Below", "Above")))
+  # Here I select the Optimized cutoff
+ counts <- counts %>%
+   filter(Type %in% "Optimized") %>%
+   rename(Position.main = !!rlang::sym(v.now))
+ 
+ counts <- counts %>%
+   mutate(quadrant = case_when(
+     Position == "Above" & Position.main == "Above" ~ 1,
+     Position == "Below" & Position.main == "Above" ~ 2,
+     Position == "Below" & Position.main == "Below" ~ 3,
+     Position == "Above" & Position.main == "Below" ~ 4))
+ counts <- counts %>%
+   select(-Position, -Position.main)
+
+ full.quadrants <- expand.grid(quadrant = 1:4,
+        `Ground truth` = levels(counts$`Ground truth`),
+        Test = unique(counts$Test))
+ 
+ counts.now <- filter(counts, Test != v.now) %>%
+  droplevels() %>%
+   full_join(full.quadrants) %>%
+   mutate(Percentage = ifelse(is.na(Percentage), 0, Percentage))
+ thresholds.now <- thresholds %>%
+    filter(Test != "NT") 
+  # End dealing with counts in each quadrant
+  # Start plots
+ 
+# Roche vs. cPass
+p7f <- lab.long.wo %>% filter(Test %in% c("Roche", "cPass")) %>% spread(Test, value) %>%
+  gather(Test, value, -c(tln_ID, blut_ID, `Ground truth`, v.now)) %>%
+    filter(Test != v.now) %>% droplevels() %>%
+  ggplot(aes_string(x = "value", y = v.now, color = "`Ground truth`")) +
+  geom_point(data = .%>% filter(`Ground truth` == "Unknown"), alpha=0.5) +
+  geom_point(data = .%>% filter(`Ground truth` != "Unknown"), alpha=0.5) +
+  scale_y_log10(expand=expansion(mult=c(0.2,0.2))) +
+  scale_colour_manual(values=style$pal3[c(2, 3, 1)]) +
+  geom_vline(data = filter(thresholds.now, Test %in%  "cPass"),
+             aes(xintercept=Manufacturer, lty=style$thr_lb_old),
+             color=style$thr_lc_old) +
+  geom_vline(data = filter(thresholds.now, Test %in% "cPass"),
+             aes(xintercept=Optimized, lty=style$thr_lb_new),
+             color=style$thr_lc_new)  +
+  geom_hline(yintercept = thresholds$Manufacturer[thresholds$Test == v.now],
+             color=style$thr_lc_old, lty=style$thr_lt_old) +
+  geom_hline(yintercept = thresholds$Optimized[thresholds$Test == v.now],
+             color=style$thr_lc_new, lty=style$thr_lt_new) +
+  scale_linetype_manual(name="Threshold",
+                        values=c(style$thr_lt_old, style$thr_lt_new)) +
+  # 1st quadrant
+  geom_text(data = filter(counts.now, quadrant == 1 & 
+                              `Ground truth` == "True-positive" & 
+                            Test == "cPass"),
+            aes(x=Inf, y=Inf, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts.now, quadrant == 1 & 
+                            `Ground truth` == "True-negative" & 
+                            Test == "cPass"),
+            aes(x=Inf, y=Inf, label=paste(round(Percentage, 0), "%")), 
+            hjust=1, vjust=2.15, show.legend=FALSE, size=3.5) +
+  # 2nd quadrant
+  geom_text(data = filter(counts.now, quadrant == 2 & 
+                            `Ground truth` == "True-positive" & 
+                            Test == "cPass"),
+            aes(x=-Inf, y=Inf, label=paste(round(Percentage, 0), "%")),
+            hjust=-0.1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts.now, quadrant == 2 & 
+                            `Ground truth` == "True-negative" & 
+                            Test == "cPass"),
+            aes(x=-Inf, y=Inf, label=paste(round(Percentage, 0), "%")), 
+            hjust=-0.1, vjust=2.15, show.legend=FALSE, size=3.5) +
+  # 3rd quadrant
+  geom_text(data = filter(counts.now, quadrant == 3 & 
+                            `Ground truth` == "True-positive" & 
+                            Test == "cPass"),
+            aes(x=-Inf, y=0, label=paste(round(Percentage, 0), "%")),
+            hjust=-0.2, vjust=-0.1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts.now, quadrant == 3 & 
+                            `Ground truth` == "True-negative" & 
+                            Test == "cPass"),
+            aes(x=-Inf, y=0, label=paste(round(Percentage, 0), "%")), 
+            hjust=-0.1, vjust=-1.3, show.legend=FALSE, size=3.5) +
+  # 4th quadrant
+  geom_text(data = filter(counts.now, quadrant == 4 & 
+                            `Ground truth` == "True-positive" & 
+                            Test == "cPass"),
+            aes(x=Inf, y=0, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=-0.1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts.now, quadrant == 4 & 
+                            `Ground truth` == "True-negative" & 
+                            Test == "cPass"),
+            aes(x=Inf, y=0, label=paste(round(Percentage, 0), "%")), 
+            hjust=1, vjust=-1.3, show.legend=FALSE, size=3.5) +
+  theme(legend.position = "none") +
+  ylab("Ro-N-Ig") +
+  xlab("GS-cPass") +
+  geom_smooth(data = .%>% filter(Roche >= 0.422 & value >= 20),
+              method="lm", aes(color = NULL), color="black")
+p7f
+
+#----------------------------------------------- Fig7 - G
+
+# Roche vs. LineBlot MG-RBD
+p7g <- lab.long.wo %>% filter(Test %in% c("Roche", "LineBlot_RBD_SARS_2")) %>% spread(Test, value) %>%
+  gather(Test, value, -c(tln_ID, blut_ID, `Ground truth`, v.now)) %>%
+    filter(Test != v.now) %>% droplevels() %>%
+  ggplot(aes_string(x = "value", y = v.now, color = "`Ground truth`")) +
+  geom_point(data = .%>% filter(`Ground truth` == "Unknown"), alpha=0.5) +
+  geom_point(data = .%>% filter(`Ground truth` != "Unknown"), alpha=0.5) +
+  #scale_y_continuous(expand=expansion(mult=c(2,2))) + 
+#  scale_x_log10(expand=expansion(mult=c(0.15,0.15))) +
+  scale_y_log10(expand=expansion(mult=c(0.2,0.2))) +
+  scale_colour_manual(values=style$pal3[c(2, 3, 1)]) +
+  geom_vline(data = filter(thresholds.now, Test %in%  "LineBlot_RBD_SARS_2"),
+             aes(xintercept=Manufacturer, lty=style$thr_lb_old),
+             color=style$thr_lc_old) +
+   geom_vline(data = filter(thresholds.now, Test %in% "LineBlot_RBD_SARS_2"),
+             aes(xintercept=Optimized, lty=style$thr_lb_new),
+             color=style$thr_lc_new)  +
+  geom_hline(yintercept = thresholds$Manufacturer[thresholds$Test == v.now],
+             color=style$thr_lc_old, lty=style$thr_lt_old) +
+  geom_hline(yintercept = thresholds$Optimized[thresholds$Test == v.now],
+             color=style$thr_lc_new, lty=style$thr_lt_new) +
+  scale_linetype_manual(name="Threshold",
+                        values=c(style$thr_lt_old, style$thr_lt_new)) +
+  # 1st quadrant
+  geom_text(data = filter(counts.now, quadrant == 1 & 
+                              `Ground truth` == "True-positive" & 
+                            Test == "LineBlot_RBD_SARS_2"),
+            aes(x=Inf, y=Inf, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts.now, quadrant == 1 & 
+                            `Ground truth` == "True-negative" & 
+                            Test == "LineBlot_RBD_SARS_2"),
+            aes(x=Inf, y=Inf, label=paste(round(Percentage, 0), "%")), 
+            hjust=1, vjust=2.15, show.legend=FALSE, size=3.5) +
+  # 2nd quadrant
+  geom_text(data = filter(counts.now, quadrant == 2 & 
+                            `Ground truth` == "True-positive" & 
+                            Test == "LineBlot_RBD_SARS_2"),
+            aes(x=0, y=Inf, label=paste(round(Percentage, 0), "%")),
+            hjust=-0.1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts.now, quadrant == 2 & 
+                            `Ground truth` == "True-negative" & 
+                            Test == "LineBlot_RBD_SARS_2"),
+            aes(x=0, y=Inf, label=paste(round(Percentage, 0), "%")), 
+            hjust=-0.1, vjust=2.3, show.legend=FALSE, size=3.5) +
+  # 3rd quadrant
+  geom_text(data = filter(counts.now, quadrant == 3 & 
+                            `Ground truth` == "True-positive" & 
+                            Test == "LineBlot_RBD_SARS_2"),
+            aes(x=0, y=0, label=paste(round(Percentage, 0), "%")),
+            hjust=-0.2, vjust=-0.1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts.now, quadrant == 3 & 
+                            `Ground truth` == "True-negative" & 
+                            Test == "LineBlot_RBD_SARS_2"),
+            aes(x=0, y=0, label=paste(round(Percentage, 0), "%")), 
+            hjust=-0.1, vjust=-1.3, show.legend=FALSE, size=3.5) +
+  # 4th quadrant
+  geom_text(data = filter(counts.now, quadrant == 4 & 
+                            `Ground truth` == "True-positive" & 
+                            Test == "LineBlot_RBD_SARS_2"),
+            aes(x=Inf, y=0, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=-0.1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts.now, quadrant == 4 & 
+                            `Ground truth` == "True-negative" & 
+                            Test == "LineBlot_RBD_SARS_2"),
+            aes(x=Inf, y=0, label=paste(round(Percentage, 0), "%")), 
+            hjust=1, vjust=-1.3, show.legend=FALSE, size=3.5) +
+  theme(legend.position = "none") +
+  ylab("Ro-N-Ig") +
+  xlab("MG-RBD") +
+  scale_x_log10(breaks=c(0.5,  1, 3, 10), labels=c("<1", "1", "3", "10")) +
+    geom_smooth(data = .%>% filter(Roche >= 0.422 & value >= 1),
+              method="lm", aes(color = NULL), color="black")
+p7g
+
+#----------------------------------------------- Fig7 - H
+# Roche vs. LineBlot MG-N
+p7h <- lab.long.wo %>% filter(Test %in% c("Roche", "LineBlot_NP_SARS_2")) %>% spread(Test, value) %>%
+  gather(Test, value, -c(tln_ID, blut_ID, `Ground truth`, v.now)) %>%
+    filter(Test != v.now) %>% droplevels() %>%
+  ggplot(aes_string(x = "value", y = v.now, color = "`Ground truth`")) +
+  geom_point(data = .%>% filter(`Ground truth` == "Unknown"), alpha=0.5) +
+  geom_point(data = .%>% filter(`Ground truth` != "Unknown"), alpha=0.5) +
+  scale_y_log10(expand=expansion(mult=c(0.2,0.2))) +
+  scale_colour_manual(values=style$pal3[c(2, 3, 1)]) +
+  geom_vline(xintercept=thresholds$Manufacturer[thresholds$Test == "LineBlot_NP_SARS_2"],
+             lty=style$thr_lt_old, color=style$thr_lc_old) +
+   geom_vline(xintercept=thresholds$Optimized[thresholds$Test=="LineBlot_NP_SARS_2"],
+             lty=style$thr_lt_new, color=style$thr_lc_new)  +
+  geom_hline(data = filter(thresholds.now, Test %in% v.now),
+              aes(yintercept=Manufacturer, lty=style$thr_lb_old),
+              color=style$thr_lc_old) +
+   geom_hline(data = filter(thresholds.now, Test %in% v.now),
+              aes(yintercept=Optimized, lty=style$thr_lb_new),
+              color=style$thr_lc_new) +
+  scale_linetype_manual(name="Cut-off",
+                        values=c(style$thr_lt_old, style$thr_lt_new)) +
+  # 1st quadrant
+  geom_text(data = filter(counts.now, quadrant == 1 & 
+                              `Ground truth` == "True-positive" & 
+                            Test == "LineBlot_NP_SARS_2"),
+            aes(x=Inf, y=Inf, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=1, show.legend=FALSE) +
+  geom_text(data = filter(counts.now, quadrant == 1 & 
+                            `Ground truth` == "True-negative" & 
+                            Test == "LineBlot_NP_SARS_2"),
+            aes(x=Inf, y=Inf, label=paste(round(Percentage, 0), "%")), 
+            hjust=1, vjust=2.15, show.legend=FALSE) +
+  # 2nd quadrant
+  geom_text(data = filter(counts.now, quadrant == 2 & 
+                            `Ground truth` == "True-positive" & 
+                            Test == "LineBlot_NP_SARS_2"),
+            aes(x=0, y=Inf, label=paste(round(Percentage, 0), "%")),
+            hjust=-0.1, vjust=1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts.now, quadrant == 2 & 
+                            `Ground truth` == "True-negative" & 
+                            Test == "LineBlot_NP_SARS_2"),
+            aes(x=0, y=Inf, label=paste(round(Percentage, 0), "%")), 
+            hjust=-0.1, vjust=2.3, show.legend=FALSE, size=3.5) +
+  # 3rd quadrant
+  geom_text(data = filter(counts.now, quadrant == 3 & 
+                            `Ground truth` == "True-positive" & 
+                            Test == "LineBlot_NP_SARS_2"),
+            aes(x=0, y=0, label=paste(round(Percentage, 0), "%")),
+            hjust=-0.2, vjust=-0.1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts.now, quadrant == 3 & 
+                            `Ground truth` == "True-negative" & 
+                            Test == "LineBlot_NP_SARS_2"),
+            aes(x=0, y=0, label=paste(round(Percentage, 0), "%")), 
+            hjust=-0.1, vjust=-1.3, show.legend=FALSE, size=3.5) +
+  # 4th quadrant
+  geom_text(data = filter(counts.now, quadrant == 4 & 
+                            `Ground truth` == "True-positive" & 
+                            Test == "LineBlot_NP_SARS_2"),
+            aes(x=Inf, y=0, label=paste(round(Percentage, 0), "%")),
+            hjust=1, vjust=-0.1, show.legend=FALSE, size=3.5) +
+  geom_text(data = filter(counts.now, quadrant == 4 & 
+                            `Ground truth` == "True-negative" & 
+                            Test == "LineBlot_NP_SARS_2"),
+            aes(x=Inf, y=0, label=paste(round(Percentage, 0), "%")), 
+            hjust=1, vjust=-1.3, show.legend=FALSE, size=3.5) +
+  theme(legend.position = "bottom") +
+  ylab("Ro-N-Ig") +
+  xlab("MG-N") +
+  scale_x_log10(breaks=c(0.5,  1, 3, 10), labels=c("<1", "1", "3", "10")) +
+  geom_smooth(data = .%>% filter(Roche >= 0.422 & value >= 1),
+              method="lm", aes(color = NULL), color="black")
+p7h
+
+legend.p7 <- cowplot::get_legend(p7h)
+legend.p7
+grid.newpage()
+grid.draw(legend.p7)
+p7h <- p7h + theme(legend.position="none")
+p7h
+
+#------------- updated multifigure compilation
+
+
+plot_grid(
+  plot_grid(
+    title_plot("A", p7a), p7b, p7c, p7d,
+    nrow=1, rel_widths = c(0.25,0.25, 0.25, 0.25)),
+  plot_grid(
+    title_plot("B", p7e), p7f, p7g, p7h, 
+    nrow=1, rel_widths = c(0.25, 0.25, 0.25, 0.25)),
+  plot_grid(
+    legend.p7, nrow=1),
+  nrow=3, rel_heights = c(0.475, 0.475, 0.05))
+
+ggsave(here_out("Lab-Fig-7-updated21.png"), width=14, height=7, units="in")
+ggsave(here_out("Lab-Fig-7-updated21.pdf"), width=14, height=7, units="in")
+
+# #------------- multifigure compilation
+# 
+# 
+# plot_grid(
+#   plot_grid(
+#     title_plot("A", p7a),
+#     title_plot("B", p7b),
+#     title_plot("C", p7c),
+#     title_plot("D", p7d),
+#     nrow=1, rel_widths = c(0.25,0.25, 0.25, 0.25)),
+#   plot_grid(
+#     title_plot("E", p7e),
+#     title_plot("F", p7f), 
+#     title_plot("G", p7g),
+#     title_plot("H", p7h), 
+#     nrow=1, rel_widths = c(0.25, 0.25, 0.25, 0.25)),
+#   plot_grid(
+#     legend.p7, nrow=1),
+#   nrow=3, rel_heights = c(0.475, 0.475, 0.05))
+# 
+# ggsave(here_out("Lab-Fig-7.png"), width=14, height=7, units="in")
+# ggsave(here_out("Lab-Fig-7.pdf"), width=14, height=7, units="in")
+
+# Calculate number in plot B
+test <- lab %>%
+  select(IgG, cPass, `Ground truth`) %>%
+  filter(`Ground truth` != "True-negative") %>%
+  filter(!is.na(cPass) & !is.na(IgG)) %>%
+  filter(cPass < thresholds$Optimized[thresholds$Test == "cPass"]) %>%
+  filter(IgG > thresholds$Optimized[thresholds$Test == "IgG"])
+table(test$`Ground truth`)  
+
+# Calculate number in plot C
+test <- lab %>%
+  select(IgG, LineBlot_RBD_SARS_2, `Ground truth`) %>%
+  filter(`Ground truth` != "True-negative") %>%
+  filter(!is.na(LineBlot_RBD_SARS_2) & !is.na(IgG)) %>%
+  filter(LineBlot_RBD_SARS_2 < thresholds$Optimized[thresholds$Test == "LineBlot_RBD_SARS_2"]) %>%
+  filter(IgG > thresholds$Optimized[thresholds$Test == "IgG"])
+table(test$`Ground truth`)  
+```
+
+### SI Fig7A
+
+```{r, fig.width = 10, fig.height = 6, results = FALSE, echo=FALSE, warning=FALSE}
+
+lab %>%
+  mutate(NT = as.character(NT),
+         NT = ifelse(NT == "1:5", "5", ifelse(NT == "<5", "1", 
+                                              ifelse(NT == ">80", "80", NT)))) %>%
+  mutate(NT = as.numeric(NT)) %>%
+  tidyr::gather(Test, value, 
+                c(IgA, cPass, NT,
+                  VC_S1_IgA, VC_S2_IgA, 
+                  VC_N_IgA, VC_S1_IgM, 
+                  VC_S2_IgM, VC_N_IgM, 
+                  VC_S1_IgG, VC_S2_IgG, 
+                  VC_N_IgG, LineBlot_NP_SARS_2,
+                  LineBlot_RBD_SARS_2, LineBlot_S1_SARS_2,
+                  Schnupfen_NP_229E, Schnupfen_NP_NL63, 
+         Schnupfen_NP_OC43, Schnupfen_NP_HKU1)) %>%
+  left_join(thresholds) %>%
+  left_join(Test.names) %>%
+  mutate(name = fct_inorder(name)) %>%
+  mutate(Result = case_when(
+    value < Manufacturer ~ "Negative",
+    value >= Manufacturer ~ "Positive",
+    is.na(value) ~ "Not performed")) %>%
+  ggplot(aes(x=Roche, y = IgG, color = Result)) +
+  geom_point(data = .%>% filter(Result %in% "Not performed"), alpha=0.3) +
+  geom_point(data = .%>% filter(Result %in% "Negative"), alpha=0.3) +
+  geom_point(data = .%>% filter(Result %in% "Positive"), alpha=0.3) +
+  scale_y_log10() + scale_x_log10() +
+  ylab("EI-S1-IgG") + xlab("Ro-N-Ig") +
+  geom_hline(data = thresholds %>%
+               filter(Test == "IgG") %>%
+               select(-Test),
+             aes(yintercept=Manufacturer, lty=style$thr_lb_old),
+             color=style$thr_lc_old) +
+  geom_hline(data = thresholds %>%
+               filter(Test == "IgG") %>%
+               select(-Test),
+             aes(yintercept=Optimized, lty=style$thr_lb_new),
+             color=style$thr_lc_new)  +
+  geom_vline(xintercept = thresholds$Manufacturer[thresholds$Test == "Roche"], color=style$thr_lc_old, lty=style$thr_lt_old) +
+  geom_vline(xintercept = thresholds$Optimized[thresholds$Test == "Roche"],
+             color=style$thr_lc_new, lty=style$thr_lt_new) +
+  scale_linetype_manual(name="Cut-off",
+                        values=c(style$thr_lt_old, style$thr_lt_new)) +
+  facet_wrap(~name, ncol=5) +
+  theme_bw() + theme(legend.position="bottom") +
+  scale_color_manual(values=c("#009E73", "grey", "#CC6666")) +
+  ggtitle("Binary results based on Manufacturer cut-off")
+ggsave(here_out("Fig-SI-7A_updated21.pdf"), width=10, height=6)
+ggsave(here_out("Fig-SI-7A_updated21.png"), width=10, height=6)
+```
+
+
+### SI Fig 7B
+
+```{r, fig.width = 10, fig.height = 6, results = FALSE, echo=FALSE, warning=FALSE}
+lab %>%
+  mutate(NT = as.character(NT),
+         NT = ifelse(NT == "<5", "1", ifelse(NT == "1:5", "5", 
+                                             ifelse(NT == ">80", "80", NT)))) %>%
+  mutate(NT = as.numeric(NT)) %>%
+  tidyr::gather(Test, value, 
+                c(IgA, cPass, NT,
+                  VC_S1_IgA, VC_S2_IgA, VC_N_IgA, VC_S1_IgM, 
+                  VC_S2_IgM, VC_N_IgM, VC_S1_IgG, VC_S2_IgG, 
+                  VC_N_IgG, LineBlot_NP_SARS_2,
+                  LineBlot_RBD_SARS_2, LineBlot_S1_SARS_2,
+                  Schnupfen_NP_229E, Schnupfen_NP_NL63, 
+                  Schnupfen_NP_OC43, Schnupfen_NP_HKU1)) %>%
+  left_join(thresholds) %>%
+   left_join(Test.names) %>%
+  mutate(name = fct_inorder(name)) %>%
+  mutate(Result = case_when(
+    value < Optimized ~ "Negative",
+    value >= Optimized ~ "Positive",
+    is.na(value) ~ "Not performed")) %>%
+  ggplot(aes(x=Roche, y = IgG, color = Result)) +
+  geom_point(data = .%>% filter(Result %in% "Not performed"), alpha=0.3) +
+  geom_point(data = .%>% filter(Result %in% "Negative"), alpha=0.3) +
+  geom_point(data = .%>% filter(Result %in% "Positive"), alpha=0.3) +
+  scale_y_log10() + scale_x_log10() +
+  ylab("EI-S1-IgG") + xlab("Ro-N-Ig") +
+  geom_hline(data = thresholds %>%
+               filter(Test == "IgG") %>%
+               select(-Test),
+             aes(yintercept=Manufacturer, lty=style$thr_lb_old),
+             color=style$thr_lc_old) +
+  geom_hline(data = thresholds %>%
+               filter(Test == "IgG") %>%
+               select(-Test),
+             aes(yintercept=Optimized, lty=style$thr_lb_new),
+             color=style$thr_lc_new) +
+  geom_vline(xintercept = thresholds$Manufacturer[thresholds$Test == "Roche"], color=style$thr_lc_old, lty=style$thr_lt_old) +
+  geom_vline(xintercept = thresholds$Optimized[thresholds$Test == "Roche"],
+             color=style$thr_lc_new, lty=style$thr_lt_new) +
+  scale_linetype_manual(name="Cut-off",
+                        values=c(style$thr_lt_old, style$thr_lt_new)) +
+  facet_wrap(~name, ncol=5) +
+  theme_bw() + theme(legend.position="bottom") +
+   scale_color_manual(values=c("#009E73", "grey", "#CC6666")) +
+  ggtitle("Binary results based on Optimized cut-off")
+ggsave(here_out("Fig-SI-7B_updated21.pdf"), width=10, height=6)
+ggsave(here_out("Fig-SI-7B_updated21.png"), width=10, height=6)
+```
+
+
+### SI Figs 6 and 10
+
+```{r, fig.width = 10, fig.height = 6, results = FALSE, echo=FALSE, warning=FALSE}
+
+############# Both optimized and manufacturer together
+lab.long.wo <- lab.long.wo %>%
+  left_join(Test.names) %>%
+  select(-Test) %>%
+  rename(Test = name)
+thresholds <- thresholds %>%
+  left_join(Test.names) %>%
+  select(-Test) %>%
+  rename(Test = name)
+
+for(v in 1:length(unique(lab.long.wo$Test))){
+  v.now <- unique(lab.long.wo$Test)[v]
+  # Deal with counts at each quadrant
+  no.se.que <- lab.long.wo %>% 
+    left_join(gather(thresholds, Type, Threshold, -Test)) %>%
+    mutate(Position = ifelse(value >= Threshold, "Above", "Below")) %>%
+    select(-value, -Threshold) %>% 
+    spread(Test, Position) %>%
+    gather(Test, Position, -c(tln_ID, blut_ID, 
+                           `Ground truth`, Type, v.now)) %>%
+    filter(Test != v.now) %>%
+    filter(!is.na(Position)) %>%
+    filter(!is.na(!!rlang::sym(v.now)))
+  
+  counts.gt.quadrants <- no.se.que %>%
+    group_by_at(c("Type", "Test", "Position", "Ground truth", v.now)) %>%
+    summarize(N=n()) %>%
+    ungroup()
+  counts.quadrants <- no.se.que %>%
+    group_by_at(c("Type", "Test", "Ground truth")) %>%
+    summarize(N.gt=n())  %>%
+    ungroup()
+  
+  counts <- left_join(counts.gt.quadrants, counts.quadrants) %>%
+    mutate(Percentage = N / N.gt * 100) %>%
+    mutate(!!v.now := factor(!!rlang::sym(v.now), 
+                             levels=c("Below", "Above")))
+  # Here I rename the test as position.main
+ counts <- counts %>%
+   rename(Position.main = !!rlang::sym(v.now))
+ 
+ counts <- counts %>%
+   group_by(Type) %>%
+   mutate(quadrant = case_when(
+     Position == "Above" & Position.main == "Above" ~ 1,
+     Position == "Above" & Position.main == "Below" ~ 2,
+     Position == "Below" & Position.main == "Below" ~ 3,
+     Position == "Below" & Position.main == "Above" ~ 4))
+ counts <- counts %>%
+   select(-Position, -Position.main)
+
+ full.quadrants <- expand.grid(quadrant = 1:4,
+        `Ground truth` = levels(counts$`Ground truth`),
+        Test = unique(counts$Test),
+        Type = unique(counts$Type))
+ 
+ counts <- filter(counts, Test != v.now) %>%
+  droplevels() %>%
+   full_join(full.quadrants) %>%
+   mutate(Percentage = ifelse(is.na(Percentage), 0, Percentage)) %>%
+   ungroup()
+ 
+ counts.man <- counts %>%
+   filter(Type %in% "Manufacturer") %>%
+   select(Test, `Ground truth`, Percentage, quadrant) %>%
+   rename(Percentage.man = Percentage)
+ counts.opt <- counts %>%
+   filter(Type %in% "Optimized") %>%
+   select(Test, `Ground truth`, Percentage, quadrant) %>%
+   rename(Percentage.opt = Percentage)
+ 
+ counts.now <- left_join(counts.man, counts.opt) %>%
+   mutate(Percentage.man = paste0(as.character(round(Percentage.man, 0)), "%"),
+          Percentage.opt = paste0(as.character(round(Percentage.opt, 0)), "%")) %>%
+   mutate(Percentage = paste0(Percentage.man, " (", Percentage.opt, ")"))
+ 
+ thresholds.now <- thresholds %>%
+     filter(Test != "NT") 
+  # End dealing with counts in each quadrant
+  # Start plot
+  plots.round <- lab.long.wo %>% 
+    spread(Test, value) %>%
+    gather(Test, value, -c(tln_ID, blut_ID, 
+                           `Ground truth`, v.now)) %>%
+    filter(Test != v.now) %>%
+    droplevels() %>%
+    ggplot(aes(y = value, x = !!rlang::sym(v.now),
+                    color = `Ground truth`)) +
+  geom_point(data = .%>% filter(`Ground truth` == "Unknown"), alpha=0.5) +
+  geom_point(data = .%>% filter(`Ground truth` != "Unknown"), alpha=0.5) +
+  scale_y_log10(expand=expansion(mult=c(0.3,0.3))) + 
+  scale_x_log10(expand=expansion(mult=c(0.3,0.3))) +
+  facet_wrap(~Test, scales="free", ncol=5) +
+  theme_bw() +
+   scale_colour_manual(values=style$pal3[c(2, 3, 1)]) +
+  geom_hline(data = filter(thresholds.now, Test != v.now), 
+             aes(yintercept=Manufacturer, lty=style$thr_lb_old),
+             color=style$thr_lc_old) +
+  geom_hline(data = filter(thresholds.now, Test != v.now), 
+             aes(yintercept=Optimized, lty=style$thr_lb_new),
+             color=style$thr_lc_new)  +
+  geom_vline(xintercept = thresholds$Manufacturer[thresholds$Test == v.now],
+             color=style$thr_lc_old, lty=style$thr_lt_old) +
+  geom_vline(xintercept = thresholds$Optimized[thresholds$Test == v.now],
+             color=style$thr_lc_new, lty=style$thr_lt_new) +
+  scale_linetype_manual(name="Cut-off",
+                        values=c(style$thr_lt_old, style$thr_lt_new)) +
+  ylab("Measurement value") + xlab(v.now) +
+    ggtitle(v.now) +
+    geom_text(data = filter(counts.now, quadrant == 1 & 
+                              `Ground truth` == "True-positive"),
+            aes(x=Inf, y=Inf, label=Percentage),
+            hjust=1, vjust=1, show.legend=FALSE, size=3.5) +
+    geom_text(data = filter(counts.now, quadrant == 1 & 
+                              `Ground truth` == "True-negative"),
+            aes(x=Inf, y=Inf, label=Percentage), 
+            hjust=1, vjust=2.15, show.legend=FALSE, size=3.5) +
+    geom_text(data = filter(counts.now, quadrant == 2 & 
+                              `Ground truth` == "True-positive"),
+            aes(x=0, y=Inf, label=Percentage),
+            hjust=-0.1, vjust=1, show.legend=FALSE, size=3.5) +
+    geom_text(data = filter(counts.now, quadrant == 2 & 
+                              `Ground truth` == "True-negative"),
+            aes(x=0, y=Inf, label=Percentage), 
+            hjust=-0.1, vjust=2.3, show.legend=FALSE, size=3.5) +
+    geom_text(data = filter(counts.now, quadrant == 3 & 
+                              `Ground truth` == "True-positive"),
+            aes(x=0, y=0, label=Percentage),
+            hjust=-0.1, vjust=-0.1, show.legend=FALSE, size=3.5) +
+    geom_text(data = filter(counts.now, quadrant == 3 & 
+                              `Ground truth` == "True-negative"),
+            aes(x=0, y=0, label=Percentage), 
+            hjust=-0.1, vjust=-1.3, show.legend=FALSE, size=3.5) +
+       geom_text(data = filter(counts.now, quadrant == 4 & 
+                              `Ground truth` == "True-positive"),
+            aes(x=Inf, y=0, label=Percentage),
+            hjust=1, vjust=-0.1, show.legend=FALSE, size=3.5) +
+    geom_text(data = filter(counts.now, quadrant == 4 & 
+                              `Ground truth` == "True-negative"),
+            aes(x=Inf, y=0, label=Percentage), 
+            hjust=1, vjust=-1.3, show.legend=FALSE, size=3.5) +
+    theme(legend.position="bottom")
+   
+ # print(plots.round)
+  ggsave(file=here_out(paste0("Fig-scatterplots-all-", v.now, ".pdf")),
+         plots.round, width=15, height=9)
+  ggsave(file=here_out(paste0("Fig-scatterplots-all-", v.now, ".png")),
+         plots.round, width=15, height=9)
+}
+
+
+```
+
+
+### SI Figs 6 and 10 for NT
+
+```{r, fig.width = 10, fig.height = 6, results = FALSE, echo=FALSE, warning=FALSE}
+
+lab.long %>%
+  spread(Test, value) %>%
+  mutate(NT = factor(NT, levels=c("<5", "1:5", "10", "20", "40", ">80"))) %>%
+  gather(Test, value, c(Roche, IgG, IgA, cPass, 
+                  VC_S1_IgA, VC_S2_IgA,  
+                  VC_N_IgA, VC_S1_IgM, 
+                  VC_S2_IgM, VC_N_IgM, 
+                  VC_S1_IgG, VC_S2_IgG, 
+                  VC_N_IgG, LineBlot_NP_SARS_2,
+                  LineBlot_RBD_SARS_2, LineBlot_S1_SARS_2,
+                  Schnupfen_NP_229E, Schnupfen_NP_NL63, 
+                  Schnupfen_NP_OC43, Schnupfen_NP_HKU1)) %>%
+  mutate(value = as.numeric(value)) %>%
+  left_join(Test.names) %>%
+  select(-Test) %>%
+  rename(Test = name) %>%
+  left_join(thresholds) %>%
+  filter(!is.na(NT)) %>%
+  ggplot(aes(y=value, x = as.numeric(NT)-0.02, color = `Ground truth`)) +
+  geom_jitter(alpha=0.5, width=0.15) +
+  facet_wrap(~Test, scales="free") +
+  ylab("Measurement value") +
+   scale_color_manual(values=style$pal3) +
+  geom_hline(data = thresholds %>% filter(Test != "NT"), 
+             aes(yintercept=Manufacturer, lty=style$thr_lb_old),
+             color=style$thr_lc_old) +
+  geom_hline(data = thresholds %>% filter(Test != "NT"), 
+             aes(yintercept=Optimized, lty=style$thr_lb_new),
+             color=style$thr_lc_new)  +
+  geom_vline(xintercept=1.5, color=style$thr_lc_old, 
+             lty=style$thr_lt_old) +
+  geom_vline(xintercept=1.5, color=style$thr_lc_new, 
+             lty=style$thr_lt_new) +
+  scale_linetype_manual(name="Cut-off",
+                        values=c(style$thr_lt_old, style$thr_lt_new)) +
+  scale_y_log10() +
+  theme(legend.position="bottom") +
+  geom_boxplot(aes(x=as.numeric(NT)+0.3, y=value, group=NT), 
+               width=0.1, outlier.shape=NA, show.legend=FALSE) +
+  scale_x_continuous(breaks=1:6,
+                     labels=c("<5", "5", "10", "20", "40", ">80")) +
+  xlab("NT")
+
+
+ggsave(here_out("Fig-scatterplots-all-NT.pdf"), width=15, height=9)
+ggsave(here_out("Fig-scatterplots-all-NT.png"), width=15, height=9)
+
+```
+
+
+### Density plot for all the tests regarding the ground truth
+
+
+```{r, fig.width = 10, fig.height = 6, results = FALSE, echo=FALSE, warning=FALSE}
+lab %>%
+  select(IgA, IgG, Roche, cPass, #NT, 
+         VC_S1_IgA, VC_S2_IgA, VC_N_IgA,
+         VC_S1_IgG, VC_S2_IgG, VC_N_IgG,
+         VC_S1_IgM, VC_S2_IgM, VC_N_IgM,
+         LineBlot_NP_SARS_2, LineBlot_RBD_SARS_2,
+         LineBlot_S1_SARS_2,
+         Schnupfen_NP_229E, Schnupfen_NP_NL63, 
+         Schnupfen_NP_OC43, Schnupfen_NP_HKU1,
+         `Ground truth`) %>%
+  gather(Test, value, -`Ground truth`) %>%
+  mutate(Test = gsub("_", " ", Test)) %>%
+  ggplot(aes(x=value, fill=`Ground truth`, color=`Ground truth`)) +
+  geom_density(alpha=0.5) +
+  facet_wrap(~Test, scales="free") +
+  theme_bw() + 
+  scale_x_log10() +
+  scale_fill_manual(values=style$pal3) +
+  scale_colour_manual(values=style$pal3) +
+  xlab("Test concentration") + ylab("Density")
+
+```
+
+### Scatterplots using ggpairs
+
+```{r, fig.width = 20, fig.height = 20, results = FALSE, echo=FALSE, warning=FALSE}
+
+p <- lab %>%
+  filter(!is.na(NT)) %>%
+  select(IgA, IgG, Roche, cPass, NT,
+         VC_S1_IgA, VC_S2_IgA, VC_N_IgA,
+         VC_S1_IgG, VC_S2_IgG, VC_N_IgG,
+         VC_S1_IgM, VC_S2_IgM, VC_N_IgM,
+         LineBlot_NP_SARS_2, LineBlot_RBD_SARS_2,
+         LineBlot_S1_SARS_2, `Ground truth`) %>%
+  mutate(CPass = case_when(
+    cPass <= 0 ~ 0.1,
+    cPass > 0 ~ cPass)) %>%
+   mutate(IgA = log(IgA), IgG = log(IgG), Roche = log(Roche),
+          cPass = log(cPass), VC_S1_IgA = log(VC_S1_IgA), 
+          VC_S2_IgA = log(VC_S2_IgA), VC_N_IgA = log(VC_N_IgA),
+          VC_S1_IgG = log(VC_S1_IgG), VC_S2_IgG = log(VC_S2_IgG),
+          VC_N_IgG = log(VC_N_IgG), VC_S1_IgM = log(VC_S1_IgM),
+          VC_S2_IgM = log(VC_S2_IgM), VC_N_IgM = log(VC_N_IgM),
+          LineBlot_NP_SARS_2 = log(LineBlot_NP_SARS_2),
+          LineBlot_RBD_SARS_2 = log(LineBlot_RBD_SARS_2),
+          LineBlot_S1_SARS_2 = log(LineBlot_S1_SARS_2)) %>%
+  ggpairs(mapping=aes(colour = `Ground truth`)) +
+  theme_bw() 
+
+for(i in 1:p$nrow) {
+  for(j in 1:p$ncol){
+    p[i,j] <- p[i,j] + 
+        scale_fill_manual(values=style$pal3) +
+        scale_color_manual(values=style$pal3)  
+  }
+}
+
+
+ggsave(file=here_out("Full-scatterplots.pdf"), p, 
+       width=24, height=18)
+```

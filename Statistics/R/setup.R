@@ -127,4 +127,7 @@ for (col in names(cutoff$old)) {
   cutoff$new[col] = cutoff_new[col, "Median"]
 }
 
+# TODO tmp fix
+cutoff$new$NT = 5
+
 rm(cutoff_new, col)

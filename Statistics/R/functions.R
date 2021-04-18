@@ -54,7 +54,7 @@ extract_last_values = function(df) {
 to_numeric = function(df) {
   # NT to numeric
   df[,"NT"] = as.character(df[,"NT"])
-  df[df[,"NT"]=="<10" & !is.na(df[,"NT"]),"NT"] = 9
+  df[df[,"NT"]=="<5" & !is.na(df[,"NT"]),"NT"] = 4
   df[df[,"NT"]==">80" & !is.na(df[,"NT"]),"NT"] = 81
   df[,"NT"] = as.numeric(df[,"NT"])
   
@@ -275,7 +275,7 @@ test_gt_bars = function(data, cols, cols_pretty, ncol_output, cutoff) {
     # Colors
     scale_fill_manual(values=c(style$col_truepos, style$col_trueneg)) +
     scale_color_manual(values=c(style$col_truepos, style$col_trueneg)) +
-    labs(x="")
+    labs(x="", y="Percentage")
 }
 
 #' Create bar plot of tests vs ground truth
@@ -339,7 +339,7 @@ gt_test_bars = function(data, cols, cols_pretty, ncol_output, cutoffs, title) {
 #' @param plot.margin Margins of the title
 #' @param rel_heights Relative heights of title and plot
 title_plot = function(title, plt, plot.margin=margin(0,0,0,7),
-                      rel_heights=c(0.1,1), fontface='bold') {
+                      rel_heights=c(0.1,1), fontface='plain') {
   plot_grid(
     ggdraw() + draw_label(title, fontface=fontface, x=0, hjust=0) +
       theme(plot.margin = plot.margin),

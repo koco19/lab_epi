@@ -1689,21 +1689,15 @@ grid.draw(legend.p7)
 p7h <- p7h + theme(legend.position="none")
 p7h
 
-#------------- multifigure compilation
+#------------- updated multifigure compilation
 
 
 plot_grid(
   plot_grid(
-    title_plot("A", p7a),
-    title_plot("B", p7b),
-    title_plot("C", p7c),
-    title_plot("D", p7d),
+    title_plot("A", p7a), p7b, p7c, p7d,
     nrow=1, rel_widths = c(0.25,0.25, 0.25, 0.25)),
   plot_grid(
-    title_plot("E", p7e),
-    title_plot("F", p7f), 
-    title_plot("G", p7g),
-    title_plot("H", p7h), 
+    title_plot("B", p7e), p7f, p7g, p7h, 
     nrow=1, rel_widths = c(0.25, 0.25, 0.25, 0.25)),
   plot_grid(
     legend.p7, nrow=1),
@@ -1711,6 +1705,29 @@ plot_grid(
 
 ggsave(here_out("Lab-Fig-7.png"), width=14, height=7, units="in")
 ggsave(here_out("Lab-Fig-7.pdf"), width=14, height=7, units="in")
+
+# #------------- multifigure compilation
+# 
+# 
+# plot_grid(
+#   plot_grid(
+#     title_plot("A", p7a),
+#     title_plot("B", p7b),
+#     title_plot("C", p7c),
+#     title_plot("D", p7d),
+#     nrow=1, rel_widths = c(0.25,0.25, 0.25, 0.25)),
+#   plot_grid(
+#     title_plot("E", p7e),
+#     title_plot("F", p7f), 
+#     title_plot("G", p7g),
+#     title_plot("H", p7h), 
+#     nrow=1, rel_widths = c(0.25, 0.25, 0.25, 0.25)),
+#   plot_grid(
+#     legend.p7, nrow=1),
+#   nrow=3, rel_heights = c(0.475, 0.475, 0.05))
+# 
+# ggsave(here_out("Lab-Fig-7.png"), width=14, height=7, units="in")
+# ggsave(here_out("Lab-Fig-7.pdf"), width=14, height=7, units="in")
 
 # Calculate number in plot B
 test <- lab %>%

@@ -16,6 +16,7 @@ library(colorspace)
 library(cowplot)
 library(geojson)
 library(grid)
+library(spatial)
 
 #######################################################
 ### Follows https://juanitorduz.github.io/germany <- plots/
@@ -204,7 +205,8 @@ p.start.district <- ggplot(data = s.hh.start,
   theme(legend.position="bottom", panel.background = element_blank(),
         axis.text=element_blank(), panel.grid.major = element_blank(),
         plot.margin=margin(0,0.45,0.25,0.45, unit="in"),
-        plot.caption = element_text(hjust=0.5, size=11))
+        plot.caption = element_text(hjust=0.5, size=11)) +
+  annotation_scale()
 p.start.district
 
 #ggsave(here_map_out("Epi-Fig2a-200914.pdf"), height=6, width=8)
@@ -231,7 +233,8 @@ p.reside <- ggplot() +
                                    name = "Number of Households") + 
   theme_bw() +
   theme(legend.position = "bottom", panel.background = element_blank(),
-        axis.text=element_blank(), panel.grid.major = element_blank())
+        axis.text=element_blank(), panel.grid.major = element_blank()) +
+  annotation_scale()
 p.reside
 
 #ggsave(here_maps_out("Epi-Fig2b-200914.pdf"), height=6, width=8)
@@ -280,7 +283,8 @@ p.houses <- ggplot() +
                                    name = "Average number of households per house") +
   theme_bw() +
   theme(legend.position = "bottom", panel.background = element_blank(),
-        axis.text=element_blank(), panel.grid.major = element_blank())
+        axis.text=element_blank(), panel.grid.major = element_blank()) +
+  annotation_scale()
 p.houses
 #ggsave("Epi-Fig2c-average-hh-house.pdf", height=6, width=8)
 #ggsave("Epi-Fig2c-average-hh-house.png", height=6, width=8)
@@ -306,7 +310,8 @@ p.size <- ggplot() +
                                    name = "Average household size") + 
   theme_bw() +
   theme(legend.position = "bottom", panel.background = element_blank(),
-        axis.text=element_blank(), panel.grid.major = element_blank())
+        axis.text=element_blank(), panel.grid.major = element_blank()) +
+  annotation_scale()
 p.size
 
 #ggsave(here_maps_out("Epi-Fig2f.pdf"), height=6, width=8)
@@ -323,3 +328,10 @@ plot_grid(p.start.district, p.reside,
 ggsave(here_maps_out("Epi-Fig1.pdf"), height=8, width=10)
 ggsave(here_maps_out("Epi-Fig1.png"), height=8, width=10)
 
+
+# Save Data
+save(hh.d, map.centroids, S, 
+     file="Data-for-prevalence-maps.RData")
+
+
+  

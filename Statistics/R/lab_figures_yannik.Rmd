@@ -35,7 +35,7 @@ source(here_r("RainCloudPlots", "R_rainclouds.R"))
 # Load data
 #  Single data contains only one blood sample per participant
 single_data = read.csv(here_lab_data(
-  "Global_Data", "Final_Lab_Single_20200904.csv"), stringsAsFactors = F)
+  "Global_Data", "New_NT_category", "Final_Lab_Single_20200904_NT.csv"), stringsAsFactors = F)
 
 ###############################################################################
 # Clean data
@@ -70,8 +70,10 @@ data$`Ground truth` = factor(
   levels = c("Unknown", "True-negative", "True-positive"))
 
 #  NT to categories with correct ordering
-data$NT = factor(as.character(data$NT),
-                 levels = c("<10", "10", "20", "40", ">80"))
+data$NT = as.character(data$NT)
+# rename 1:5 -> 5
+data[!is.na(data$NT) & data$NT=='1:5', 'NT'] = '5'
+data$NT = factor(data$NT, levels = c("<5", "5", "10", "20", "40", ">80"))
 
 ###############################################################################
 # Check data consistency
@@ -825,10 +827,10 @@ plt_nt = ggplot(data %>% dplyr::filter(!is.na(NT)),
   scale_linetype_manual(name="Cut-off", values=c(style$thr_lt_new)) +
   # Percentage annotations
   annotate("text", size=3, color=style$col_truepos, hjust="left",
-            x=1.5 + 0.1, y=190,
+            x=1.5 + 0.1, y=200,
            label=sprintf("%.0f%%", rec_new["NT", "frac_pos_rec"] * 100)) +
   annotate("text", size=3, color=style$col_trueneg, hjust="right",
-            x=1.5 - 0.1, y=190,
+            x=1.5 - 0.1, y=200,
            label=sprintf("%.0f%%", rec_new["NT", "frac_neg_rec"] * 100)) +
   labs(x=paste0(
     columns_pretty$nt, " (n=", sum(!is.na(data$NT)), ")"), y="Count") +
@@ -964,7 +966,7 @@ plt_down
 #  depending on figure size)
 plt_vc_distr_igg = plt_up + annotation_custom(
   ggplotGrob(plt_down + theme(legend.position = "none")),
-  ymin=0.15, ymax=0.7, xmin=0.3, xmax=3.7)
+  ymin=0.13, ymax=0.7, xmin=0.3, xmax=3.7)
 plt_vc_distr_igg
 
 # Save plot
@@ -1600,73 +1602,134 @@ rm(data, data_long, i, col, fmt)
 
 # Final integrated figures
 
-## Primary distributions (Figure 2)
+## Primary distributions (Figure 2 and Supplement)
 
-```{r, fig.width=12, fig.height=6}
-plot_grid(
-  title_plot(
-    "A Distributions of primary tests",
-    plt_main_distr),
-  title_plot(
-    "B Reliability of the primary tests on multiple measurements",
-    plot_grid(plt_rep_bar, NULL, rel_widths=c(2,2.5))),
-  nrow=2)
+```{r, fig.width=12, fig.height=3}
+#plot_grid(
+#  title_plot(
+#    "A Distributions of primary tests",
+#    plt_main_distr),
+#  title_plot(
+#    "B Reliability of the primary tests on multiple measurements",
+#    plot_grid(plt_rep_bar, NULL, rel_widths=c(2,2.5))),
+#  nrow=2)
+
+plt_main_distr
+
+for (fmt in style$output_formats) {
+  ggsave(here_out(paste0("Fig_Primary_Distribution.", fmt)), device=fmt,
+         dpi=style$dpi, width=12, height=3, units="in")
+}
+```
+
+```{r, fig.width=6, fig.height=3}
+
+plt_rep_bar
 
 # Save plot
 for (fmt in style$output_formats) {
-  ggsave(here_out(paste0("Fig2_Primary_Distribution.", fmt)), device=fmt,
-         dpi=style$dpi, width=12, height=6, units="in")
+  ggsave(here_out(paste0("FigSupp_Primary_Distribution.", fmt)), device=fmt,
+         dpi=style$dpi, width=6, height=3, units="in")
 }
 ```
 
 ## Primary comparison (Figure 4)
 
-```{r, fig.width=12, fig.height=6}
+```{r, fig.width=12, fig.height=3}
 load(here_r("Lab-Fig-6-Part-A.RData"))
 
+#plot_grid(
+#  plot_grid(
+#    title_plot("A Performance comparison of primary tests",
+#               plot_grid(iga.igg, roche.igg + theme(axis.title.y=element_blank()),
+#                         nrow = 1, rel_widths = c(1.05,1))),
+#    title_plot("B Parallel coordinate plot of primary tests", plt_spaghetti_main),
+#    nrow=1, rel_widths = c(3,2.2)),
+#  plot_grid(
+#    title_plot("C Concordance of primary tests", plt_main_pairs),
+#    title_plot("D Concordance of primary tests and ground truth", plt_main_gt_bar),
+#    nrow=1, rel_widths = c(2,3)),
+#  nrow=2
+#)
+
 plot_grid(
-  plot_grid(
-    title_plot("A Performance comparison of primary tests", plot_grid(iga.igg, roche.igg)),
-    title_plot("B Parallel coordinate plot of primary tests", plt_spaghetti_main),
-    nrow=1, rel_widths = c(3,2)),
-  plot_grid(
-    title_plot("C Concordance of primary tests", plt_main_pairs),
-    title_plot("D Concordance of primary tests and ground truth", plt_main_gt_bar),
-    nrow=1, rel_widths = c(2,3)),
-  nrow=2
-)
+  title_plot("A Performance comparison of primary tests",
+             plot_grid(iga.igg, roche.igg + theme(axis.title.y=element_blank()),
+                       nrow = 1, rel_widths = c(1.05,1))),
+  title_plot("B Parallel coordinate plot of primary tests", plt_spaghetti_main),
+  nrow=1, rel_widths = c(3,2.2))
 
 # Save plot
 for (fmt in style$output_formats) {
-  ggsave(here_out(paste0("Fig4_Primary_Comparison.", fmt)), device=fmt,
-         dpi=style$dpi, width=12, height=6, units="in")
+  ggsave(here_out(paste0("Fig_Primary_Comparison.", fmt)), device=fmt,
+         dpi=style$dpi, width=12, height=3, units="in")
+}
+```
+
+```{r, fig.width=12, fig.height=3}
+plot_grid(
+  title_plot("A Concordance of primary tests", plt_main_pairs),
+  title_plot("B Concordance of primary tests and ground truth", plt_main_gt_bar),
+  nrow=1, rel_widths = c(2,3))
+
+# Save plot
+for (fmt in style$output_formats) {
+  ggsave(here_out(paste0("2_Fig_Primary_Concordance.", fmt)), device=fmt,
+         dpi=style$dpi, width=12, height=3, units="in")
 }
 ```
 
 ## Confirmatory distribution and comparison (Figure 5)
 
-```{r, fig.width=12, fig.height=9}
-plot_grid(
-  plot_grid(
-    title_plot("A Distribution of NT", plt_nt + theme(legend.position="none")),
-    title_plot("B Distribution of VC-IgG and MG", plot_grid(
-      plt_vc_distr_igg + theme(legend.position="none"), plt_lineblot_distr + theme(legend.position="none"),
-      get_legend(plt_vc_distr_igg), rel_widths=c(2,2,1), nrow=1)),
-    rel_widths=c(4,11)),
-  plot_grid(
-    title_plot("C Distribution of GS-cPass", plt_cpass + theme(legend.position="none")),
-    title_plot("D Parallel coordinate plots for VC-IgG and MG", plot_grid(
-      plp_vc_igg + theme(legend.position="none"), plp_lineblot + theme(legend.position="none"),
-      get_legend(plp_vc_igg), rel_widths=c(2,2,1), nrow=1)),
-    rel_widths=c(4,11)),
-  title_plot("E Concordance of confirmatory tests and ground truth", plt_test_gt_bars_conf),
-  ncol=1, rel_heights = c(2,2,1.5)
-)
+```{r, fig.width=12, fig.height=6.5}
+#plot_grid(
+#  plot_grid(
+#    title_plot("A Distribution of NT", plt_nt + theme(legend.position="none")),
+#    title_plot("B Distribution of VC-IgG and MG", plot_grid(
+#      plt_vc_distr_igg + theme(legend.position="none"),
+#      plt_lineblot_distr + theme(legend.position="none", axis.title.y = element_blank()),
+#      get_legend(plt_vc_distr_igg), rel_widths=c(2.18,2,1), nrow=1)),
+#    rel_widths=c(4,11)),
+#  plot_grid(
+#    title_plot("C Distribution of GS-cPass", plt_cpass + theme(legend.position="none")),
+#    title_plot("D Parallel coordinate plots for VC-IgG and MG", plot_grid(
+#      plp_vc_igg + theme(legend.position="none"),
+#      plp_lineblot + theme(legend.position="none", axis.title.y = element_blank()),
+#      get_legend(plp_vc_igg), rel_widths=c(2.18,2,1), nrow=1)),
+#    rel_widths=c(4,11)),
+#  #title_plot("E Concordance of confirmatory tests and ground truth", plt_test_gt_bars_conf),
+#  ncol=1,
+#  #rel_heights = c(2,2,1.5)
+#  rel_heights = c(2,2)
+#)
+
+library(patchwork)
+
+plt_nt + theme(legend.position="none") + labs(tag='A') +
+  plt_cpass + theme(legend.position="none", axis.title.y = element_blank()) +labs(tag='B') +
+  plt_vc_distr_igg + theme(legend.position="none") + labs(tag='C') +
+  plt_lineblot_distr + theme(legend.position="none", axis.title.y = element_blank()) +labs(tag='D') +
+  get_legend(plt_cpass) +
+  plot_layout(widths = c(2,2,0.8),
+              heights = c(1,1,1,1),
+              design = "AB#\nABE\nCDE\nCD#")
+
 
 # Save plot
 for (fmt in style$output_formats) {
-  ggsave(here_out(paste0("Fig5_Confirmatory_Distribution.", fmt)), device=fmt,
-         dpi=style$dpi, width=12, height=9, units="in")
+  ggsave(here_out(paste0("Fig_Confirmatory_Distribution.", fmt)), device=fmt,
+         dpi=style$dpi, width=12, height=6.5, units="in")
+}
+```
+
+```{r, fig.width=7, fig.height=5}
+plp_vc_igg
+
+
+# Save plot
+for (fmt in style$output_formats) {
+  ggsave(here_out(paste0("2_Fig_VC_Spaghetti.", fmt)), device=fmt,
+         dpi=style$dpi, width=7, height=5, units="in")
 }
 ```
 
@@ -1680,7 +1743,7 @@ plot_grid(
 
 # Save plot
 for (fmt in style$output_formats) {
-  ggsave(here_out(paste0("FigSupp9_Cold.", fmt)), device=fmt,
+  ggsave(here_out(paste0("2_FigSupp_Cold.", fmt)), device=fmt,
          dpi=style$dpi, width=12, height=4, units="in")
 }
 ```
@@ -1692,23 +1755,34 @@ cowplot::plot_grid(plt_rep_eur, plt_rep_roche, nrow=2, labels="AUTO")
 
 # Save plot
 for (fmt in style$output_formats) {
-  ggsave(here_out(paste0("FigSupp1_Replicates_Scatter.", fmt)), device=fmt,
+  ggsave(here_out(paste0("FigSupp_Replicates_Scatter.", fmt)), device=fmt,
          dpi=style$dpi, width=7, height=7, units="in")
 }
 ```
 
 ## Full VC Array distribution and comparison (Supplementary Figure 4)
 
-```{r, fig.width=12, fig.height=10}
-plot_grid(
-  title_plot("A Distribution of VC", plt_vc_distr),
-  title_plot("B Parallel coordinate plot of VC", plp_vc),
-  nrow=2
-)
+```{r, fig.width=12, fig.height=5}
+#plot_grid(
+#  title_plot("A Distribution of VC", plt_vc_distr),
+#  title_plot("B Parallel coordinate plot of VC", plp_vc),
+#  nrow=2
+#)
+
+plt_vc_distr
 # Save plot
 for (fmt in style$output_formats) {
-  ggsave(here_out(paste0("FigSupp4_VC.", fmt)), device=fmt,
-         dpi=style$dpi, width=12, height=10, units="in")
+  ggsave(here_out(paste0("FigSupp_VC.", fmt)), device=fmt,
+         dpi=style$dpi, width=12, height=5, units="in")
+}
+```
+
+```{r, fig.width=12, fig.height=5}
+plp_vc
+# Save plot
+for (fmt in style$output_formats) {
+  ggsave(here_out(paste0("2_FigSupp_VC_Spaghetti.", fmt)), device=fmt,
+         dpi=style$dpi, width=12, height=5, units="in")
 }
 ```
 
@@ -1719,7 +1793,7 @@ plt_test_gt_bars_conf_all
 
 # Save plot
 for (fmt in style$output_formats) {
-  ggsave(here_out(paste0("FigSupp5_GroundTruth_All_Split_Accordance.", fmt)), device=fmt,
+  ggsave(here_out(paste0("FigSupp_GroundTruth_All_Split_Accordance.", fmt)), device=fmt,
          dpi=style$dpi, width=12, height=4, units="in")
 }
 ```

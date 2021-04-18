@@ -86,10 +86,14 @@ ggsave("Epi-Fig-5.png", width=7, height=3)
 
 #################################################################
 # Load data OR Roche
-d.orig <- read.csv(here_epi_out("Odds Ratio _Roche1a.csv"), 
-                   sep=";", header=TRUE)
+# Previous one, with asterisks
+# d.orig <- read.csv(here_epi_out("Odds Ratio _Roche1a.csv"), 
+#                    sep=";", header=TRUE)
+# Updated one, without asterisks
+d.orig <- read.csv(here_epi_out("Odds Ratio _Roche1b.csv"), 
+                   sep=",", header=TRUE)
 str(d.orig)
-
+head(d.orig)
 # Remove Age and Sex adjusted coefficients
 d.orig <- d.orig[c(1:8, 17:80),]
 
@@ -135,7 +139,8 @@ prettyNum0 <- function(x){
 # Unify the names between the two plots
 d$Variable  
 d <- d %>%
-  mutate(Variable = ifelse(Variable == "Loss of Sense Taste/Smell", "Loss of Sense (smell+taste)", Variable),
+  mutate(Variable = ifelse(Variable == "Loss of Sense Taste/Smell", 
+                           "Loss of Sense (smell+taste)", Variable),
          Value = ifelse(Value == "30-40sqm/individual(Q2)", "30-40sqm",
                         ifelse(Value == "40-55sqm/individual(Q3)", "40-55sqm",
                                ifelse(Value == ">55sqm/individual(Q4)", ">55sqm", Value))))
